@@ -9,6 +9,13 @@ use \Magento\Framework\Filesystem;
 
 class Config extends AbstractHelper
 {
+    /**
+     * Constants to configuration paths.
+     */
+    const CONFIG_PATH_STAGING_MODE = 'pimgento/product/staging_mode';
+
+    const STAGING_MODE_SIMPLE = 'simple';
+    const STAGING_MODE_FULL = 'full';
 
     /**
      * @var \Magento\Store\Model\StoreManagerInterface
@@ -16,15 +23,22 @@ class Config extends AbstractHelper
     protected $_storeManager;
 
     /**
+     * @var \Magento\Framework\Module\Manager
+     */
+    protected $moduleManager;
+
+    /**
      * @param \Magento\Framework\App\Helper\Context $context
      * @param StoreManagerInterface $storeManager
      */
     public function __construct(
         Context $context,
-        StoreManagerInterface $storeManager
-    )
-    {
+        StoreManagerInterface $storeManager,
+        \Magento\Framework\Module\Manager $moduleManager
+    ) {
         $this->_storeManager = $storeManager;
+        $this->moduleManager = $moduleManager;
+
         parent::__construct($context);
     }
 
@@ -72,4 +86,39 @@ class Config extends AbstractHelper
         return $this->_storeManager->getStore()->getWebsiteId();
     }
 
+    /**
+     * Get import staging mode to use.
+     *
+     * @return mixed|string
+     */
+    public function getImportStagingMode()
+    {
+
+        if (!$this->isCatalogStagingModulesEnabled()) {
+            return self::STAGING_MODE_SIMPLE;
+        } else {
+            return $this->scopeConfig->getValue(self::CONFIG_PATH_STAGING_MODE);
+        }
+    }
+
+    /**
+     * Check if staging module is enabled for the catalog.
+     *
+     * @return bool
+     */
+    public function isCatalogStagingModulesEnabled()
+    {
+        return $this->moduleManager->isEnabled('Magento_Staging')
+            && $this->moduleManager->isEnabled('Magento_CatalogStaging');
+    }
+
+    /**
+     * Check if current configuration asks import to be in full staging mode or not.
+     *
+     * @return bool
+     */
+    public function isImportInFullStagingMode()
+    {
+        return $this->getImportStagingMode() == self::STAGING_MODE_FULL;
+    }
 }
