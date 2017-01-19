@@ -166,7 +166,7 @@ class Import extends Factory
             $connection->update($tmpTable, array('_visibility' => new Expr('IF(`groups` <> "", 1, 4)')));
         }
 
-        if ($this->_productHelper->isCatalogStagingModulesEnabled()) {
+        if ($this->_helperConfig->isCatalogStagingModulesEnabled()) {
             $connection->addColumn($tmpTable, '_row_id', 'INT(11)');
         }
 
@@ -320,7 +320,7 @@ class Import extends Factory
      */
     public function matchEntity()
     {
-        if ($this->_productHelper->isCatalogStagingModulesEnabled()) {
+        if ($this->_helperConfig->isCatalogStagingModulesEnabled()) {
             /**
              * When using staging module entity id's are not the primary key of the catalog_product_entity
              * table anymore. The new primary keys is row_id. Before we get information on the row_id, we still
@@ -495,7 +495,7 @@ class Import extends Factory
             'updated_at'       => new Expr('now()'),
         );
 
-        if ($this->_productHelper->isCatalogStagingModulesEnabled()) {
+        if ($this->_helperConfig->isCatalogStagingModulesEnabled()) {
             if (!$this->_productHelper->isImportInFullStagingMode()) {
                 $values['created_in'] = new Expr(1);
                 $values['updated_in'] = new Expr(VersionManager::MAX_VERSION);
@@ -529,7 +529,7 @@ class Import extends Factory
             )
         );
 
-        if ($this->_productHelper->isCatalogStagingModulesEnabled()) {
+        if ($this->_helperConfig->isCatalogStagingModulesEnabled()) {
             /**
              * Once the catalog_entity table has been filled, we need to get the row id's for all the new new
              * versions so that we can insert the values after.
@@ -633,8 +633,8 @@ class Import extends Factory
 
         }
 
+        $identifierField =  $this->_helperConfig->isCatalogStagingModulesEnabled() ? 'row_id' : 'entity_id';
         foreach($values as $storeId => $data) {
-            $identifierField =  $this->_productHelper->isCatalogStagingModulesEnabled() ? 'row_id' : 'entity_id';
 
             $this->_entities->setValues(
                 $this->getCode(), $connection->getTableName('catalog_product_entity'), $data, 4, $storeId, 1, $identifierField
@@ -650,7 +650,7 @@ class Import extends Factory
         $connection = $this->_entities->getResource()->getConnection();
         $tmpTable = $this->_entities->getTableName($this->getCode());
 
-        $identifierAttribute = $this->_productHelper->isCatalogStagingModulesEnabled() ? '_row_id' : '_entity_id';
+        $identifierAttribute = $this->_helperConfig->isCatalogStagingModulesEnabled() ? '_row_id' : '_entity_id';
 
         if (!$this->moduleIsEnabled('Pimgento_Variant')) {
             $this->setStatus(false);
@@ -1126,7 +1126,7 @@ class Import extends Factory
         // get the product ids for parents
         // @todo use Zend methods for mass update
         // @TODO check if we can't do this in the insertFromSelect.
-        if ($this->_productHelper->isCatalogStagingModulesEnabled()) {
+        if ($this->_helperConfig->isCatalogStagingModulesEnabled()) {
             $query = "
                 UPDATE $tableRelated, $tmpTable
                 SET $tableRelated.parent_id = $tmpTable._row_id
@@ -1274,7 +1274,7 @@ class Import extends Factory
         $table->addColumn('media_value', \Magento\Framework\DB\Ddl\Table::TYPE_TEXT, 255, []);
         $table->addColumn('position', \Magento\Framework\DB\Ddl\Table::TYPE_INTEGER, 10, ['unsigned' => true]);
 
-        if ($this->_productHelper->isCatalogStagingModulesEnabled()) {
+        if ($this->_helperConfig->isCatalogStagingModulesEnabled()) {
             $table->addColumn('row_id', \Magento\Framework\DB\Ddl\Table::TYPE_INTEGER, 10, ['unsigned' => true]);
         }
 
@@ -1353,7 +1353,7 @@ class Import extends Factory
             'position'       => new Expr($position)
         ];
 
-        if ($this->_productHelper->isCatalogStagingModulesEnabled()) {
+        if ($this->_helperConfig->isCatalogStagingModulesEnabled()) {
             $cols['row_id'] = 't._row_id';
         }
 
@@ -1555,7 +1555,7 @@ class Import extends Factory
             'row_id'       => 'row_id'
         ];
 
-        if ($this->_productHelper->isCatalogStagingModulesEnabled()) {
+        if ($this->_helperConfig->isCatalogStagingModulesEnabled()) {
             $cols['row_id'] = 'row_id';
             $primary_id = 'row_id';
         } else {

@@ -29,6 +29,11 @@ class Config extends AbstractHelper
     protected $catalogInventoryConfiguration;
 
     /**
+     * @var \Magento\Framework\Module\Manager
+     */
+    protected $moduleManager;
+
+    /**
      * Constructor
      *
      * 0
@@ -41,11 +46,13 @@ class Config extends AbstractHelper
         Context $context,
         Filesystem $fileSystem,
         StoreManagerInterface $storeManager,
-        CatalogInventoryConfiguration $catalogInventoryConfiguration
+        CatalogInventoryConfiguration $catalogInventoryConfiguration,
+        \Magento\Framework\Module\Manager $moduleManager
     ) {
         $this->fileSystem = $fileSystem;
         $this->storeManager = $storeManager;
         $this->catalogInventoryConfiguration = $catalogInventoryConfiguration;
+        $this->moduleManager = $moduleManager;
 
         parent::__construct($context);
     }
@@ -188,5 +195,16 @@ class Config extends AbstractHelper
     public function getDefaultScopeId()
     {
         return $this->catalogInventoryConfiguration->getDefaultScopeId();
+    }
+
+    /**
+     * Check if staging module is enabled for the catalog.
+     *
+     * @return bool
+     */
+    public function isCatalogStagingModulesEnabled()
+    {
+        return $this->moduleManager->isEnabled('Magento_Staging')
+            && $this->moduleManager->isEnabled('Magento_CatalogStaging');
     }
 }

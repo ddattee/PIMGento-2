@@ -5,7 +5,6 @@ namespace Pimgento\Product\Helper;
 use \Magento\Framework\App\Helper\AbstractHelper;
 use \Magento\Framework\App\Helper\Context;
 use \Magento\Store\Model\StoreManagerInterface;
-use \Magento\Framework\Filesystem;
 
 class Config extends AbstractHelper
 {
@@ -23,9 +22,9 @@ class Config extends AbstractHelper
     protected $_storeManager;
 
     /**
-     * @var \Magento\Framework\Module\Manager
+     * @var \Pimgento\Import\Helper\Config
      */
-    protected $moduleManager;
+    protected $configHelper;
 
     /**
      * @param \Magento\Framework\App\Helper\Context $context
@@ -34,10 +33,10 @@ class Config extends AbstractHelper
     public function __construct(
         Context $context,
         StoreManagerInterface $storeManager,
-        \Magento\Framework\Module\Manager $moduleManager
+        \Pimgento\Import\Helper\Config $configHelper
     ) {
         $this->_storeManager = $storeManager;
-        $this->moduleManager = $moduleManager;
+        $this->configHelper = $configHelper;
 
         parent::__construct($context);
     }
@@ -94,22 +93,11 @@ class Config extends AbstractHelper
     public function getImportStagingMode()
     {
 
-        if (!$this->isCatalogStagingModulesEnabled()) {
+        if (!$this->configHelper->isCatalogStagingModulesEnabled()) {
             return self::STAGING_MODE_SIMPLE;
         } else {
             return $this->scopeConfig->getValue(self::CONFIG_PATH_STAGING_MODE);
         }
-    }
-
-    /**
-     * Check if staging module is enabled for the catalog.
-     *
-     * @return bool
-     */
-    public function isCatalogStagingModulesEnabled()
-    {
-        return $this->moduleManager->isEnabled('Magento_Staging')
-            && $this->moduleManager->isEnabled('Magento_CatalogStaging');
     }
 
     /**

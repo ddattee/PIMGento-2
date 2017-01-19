@@ -2,6 +2,7 @@
 
 namespace Pimgento\Category\Model\Factory;
 
+use Magento\Staging\Model\VersionManager;
 use \Pimgento\Import\Model\Factory;
 use \Pimgento\Entities\Model\Entities;
 use \Pimgento\Import\Helper\Config as helperConfig;
@@ -84,6 +85,19 @@ class Import extends Factory
     }
 
     /**
+     * Add required columns
+     */
+    public function addRequiredData()
+    {
+        $connection = $this->_entities->getResource()->getConnection();
+        $tmpTable = $this->_entities->getTableName($this->getCode());
+
+        if ($this->_helperConfig->isCatalogStagingModulesEnabled()) {
+            $connection->addColumn($tmpTable, '_row_id', 'INT(11)');
+        }
+    }
+
+    /**
      * Insert data into temporary table
      */
     public function insertData()
@@ -102,7 +116,43 @@ class Import extends Factory
      */
     public function matchEntity()
     {
-        $this->_entities->matchEntity($this->getCode(), 'code', 'catalog_category_entity', 'entity_id');
+        if ($this->_helperConfig->isCatalogStagingModulesEnabled()) {
+            /**
+             * When using staging module entity id's are not the primary key of the catalog_product_entity
+             * table anymore. The new primary keys is row_id. Before we get information on the row_id, we still
+             * need to get the entiy_id of the products to be imported. We are therefore going to use a different
+             * table built for this purpose in magento.
+             */
+            $this->_entities->matchEntity($this->getCode(), 'code', 'sequence_catalog_category', 'sequence_value');
+
+            // Once the entitie id's are matched we can match the row ids.
+            $this->matchRows();
+
+        } else {
+            $this->_entities->matchEntity($this->getCode(), 'code', 'catalog_category_entity', 'entity_id');
+        }
+    }
+
+    /**
+     * Matching the row id's for all our entities.
+     */
+    protected function matchRows()
+    {
+        $connection = $this->_entities->getResource()->getConnection();
+        $tmpTable = $this->_entities->getTableName($this->getCode());
+        $productTable = $this->_entities->getResource()->getTable('catalog_category_entity');
+
+        /**
+         * Update row id column.
+         * We are going to update the last version that was created if there is multiple versions
+         */
+        $connection->query(
+            'UPDATE `' . $tmpTable . '` t
+            SET `_row_id` = (
+                SELECT MAX(row_id) FROM  `' . $productTable . '` c
+                WHERE c.entity_id = t._entity_id
+            )'
+        );
     }
 
     /**
@@ -239,12 +289,51 @@ class Import extends Factory
             'level'            => 'level',
             'children_count'   => new Expr('0'),
         );
+
+        if ($this->_helperConfig->isCatalogStagingModulesEnabled()) {
+            $values['created_in'] = new Expr(1);
+            $values['updated_in'] = new Expr(VersionManager::MAX_VERSION);
+            $values['row_id'] = '_row_id';
+
+            /**
+             * When staging mode is enabled we also need to fill up the sequence_product table.
+             */
+            $sequenceValues = ['sequence_value' => '_entity_id'];
+            $parents = $connection->select()->from($tmpTable, $sequenceValues);
+            $connection->query(
+                $connection->insertFromSelect(
+                    $parents,
+                    $connection->getTableName('sequence_catalog_category'),
+                    array_keys($sequenceValues),
+                    1
+                )
+            );
+        }
+
         $parents = $connection->select()->from($tmpTable, $values);
         $connection->query(
             $connection->insertFromSelect(
-                $parents, $connection->getTableName('catalog_category_entity'), array_keys($values), 1
+                $parents,
+                $connection->getTableName('catalog_category_entity'),
+                array_keys($values),
+                1
             )
         );
+
+        if ($this->_helperConfig->isCatalogStagingModulesEnabled()) {
+            /**
+             * Once the catalog_entity table has been filled, we need to get the row id's for all the new new
+             * versions so that we can insert the values after.
+             */
+            $connection->query(
+                'UPDATE `' . $tmpTable . '` t
+                SET `_row_id` = (
+                    SELECT MAX(row_id) FROM  `' . $connection->getTableName('catalog_category_entity') . '` c
+                    WHERE c.entity_id = t._entity_id
+                )
+                WHERE t._row_id IS NULL'
+            );
+        }
 
         $values = array(
             'created_at' => new Expr('now()')
@@ -267,8 +356,10 @@ class Import extends Factory
             'display_mode'    => new Expr('"PRODUCTS"'),
         );
 
+        $identifierField =  $this->_helperConfig->isCatalogStagingModulesEnabled() ? 'row_id' : 'entity_id';
+
         $this->_entities->setValues(
-            $this->getCode(), $connection->getTableName('catalog_category_entity'), $values, 3, 0, 2
+            $this->getCode(), $connection->getTableName('catalog_category_entity'), $values, 3, 0, 2, $identifierField
         );
 
         $stores = $this->_helperConfig->getStores('lang');
@@ -285,7 +376,9 @@ class Import extends Factory
                         $connection->getTableName('catalog_category_entity'),
                         $values,
                         3,
-                        $store['store_id']
+                        $store['store_id'],
+                        1,
+                        $identifierField
                     );
                 }
             }
