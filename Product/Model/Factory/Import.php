@@ -2,6 +2,7 @@
 
 namespace Pimgento\Product\Model\Factory;
 
+use Magento\Staging\Model\VersionManager;
 use \Pimgento\Import\Model\Factory;
 use \Pimgento\Entities\Model\Entities;
 use \Pimgento\Import\Helper\Config as helperConfig;
@@ -20,6 +21,12 @@ use \Zend_Db_Expr as Expr;
 class Import extends Factory
 {
     /**
+     * Column names for the staging support.
+     */
+    const COLUMN_STAGING_CREATED_IN = 'created_in';
+    const COLUMN_STAGING_UPDATE_IN = 'update_in';
+
+    /**
      * @var Entities
      */
     protected $_entities;
@@ -37,7 +44,7 @@ class Import extends Factory
     /**
      * @var \Pimgento\Product\Helper\Config
      */
-    protected $_productHelper; 
+    protected $_productHelper;
 
     /**
      * @var \Pimgento\Product\Helper\Media
@@ -94,7 +101,7 @@ class Import extends Factory
     }
 
     /**
-     * Create temporary table
+     * Create temporary table.
      */
     public function createTable()
     {
@@ -104,9 +111,16 @@ class Import extends Factory
             $this->setContinue(false);
             $this->setStatus(false);
             $this->setMessage($this->getFileNotFoundErrorMessage());
-
         } else {
-            $this->_entities->createTmpTableFromFile($file, $this->getCode(), array('sku'));
+            $requiredColumns = ['sku'];
+
+            // If full mode is activated we need aditional columns.
+            if ($this->_productHelper->isImportInFullStagingMode()) {
+                $requiredColumns[] = self::COLUMN_STAGING_CREATED_IN;
+                $requiredColumns[] = self::COLUMN_STAGING_UPDATE_IN;
+            }
+
+            $this->_entities->createTmpTableFromFile($file, $this->getCode(), $requiredColumns);
         }
     }
 
@@ -150,6 +164,10 @@ class Import extends Factory
 
         if ($connection->tableColumnExists($tmpTable, 'groups')) {
             $connection->update($tmpTable, array('_visibility' => new Expr('IF(`groups` <> "", 1, 4)')));
+        }
+
+        if ($this->_productHelper->isCatalogStagingModulesEnabled()) {
+            $connection->addColumn($tmpTable, '_row_id', 'INT(11)');
         }
 
         if ($connection->tableColumnExists($tmpTable, 'type_id')) {
@@ -302,7 +320,56 @@ class Import extends Factory
      */
     public function matchEntity()
     {
-        $this->_entities->matchEntity($this->getCode(), 'sku', 'catalog_product_entity', 'entity_id');
+        if ($this->_productHelper->isCatalogStagingModulesEnabled()) {
+            /**
+             * When using staging module entity id's are not the primary key of the catalog_product_entity
+             * table anymore. The new primary keys is row_id. Before we get information on the row_id, we still
+             * need to get the entiy_id of the products to be imported. We are therefore going to use a different
+             * table built for this purpose in magento.
+             */
+            $this->_entities->matchEntity($this->getCode(), 'sku', 'sequence_product', 'sequence_value');
+
+            // Once the entitie id's are matched we can match the row ids.
+            $this->matchRows();
+
+        } else {
+            $this->_entities->matchEntity($this->getCode(), 'sku', 'catalog_product_entity', 'entity_id');
+        }
+    }
+
+    /**
+     * Matching the row id's for all our entities.
+     */
+    protected function matchRows()
+    {
+        if ($this->_productHelper->isImportInFullStagingMode()) {
+            /**
+             * @TODO this is a bit complicated as we need to find out if there is already a version with the current
+             * created_in & updated_in values and find the row id from there. We also need to create a new stage if
+             * required with the proper revert_id's.
+             */
+        } else {
+
+            $connection = $this->_entities->getResource()->getConnection();
+            $tmpTable = $this->_entities->getTableName($this->getCode());
+            $productTable = $this->_entities->getResource()->getTable('catalog_product_entity');
+
+            /**
+             * Update row id column.
+             * We are going to update the last version that was created if there is multiple versions
+             */
+            $connection->query(
+                'UPDATE `' . $tmpTable . '` t
+                SET `_row_id` = (
+                    SELECT MAX(row_id) FROM  `' . $productTable . '` c
+                    WHERE c.entity_id = t._entity_id
+                )'
+            );
+            /**
+             * @TODO it could be interesting to have different update rules. For example update current version
+             * or simply do an error if there are multiple versions.
+             */
+        }
     }
 
     /**
@@ -360,6 +427,9 @@ class Import extends Factory
             'groups',
             'url_key',
             'enabled',
+            // columns to handle staging.
+            'created_in',
+            'updated_in'
         );
 
         foreach ($columns as $column) {
@@ -425,12 +495,54 @@ class Import extends Factory
             'updated_at'       => new Expr('now()'),
         );
 
+        if ($this->_productHelper->isCatalogStagingModulesEnabled()) {
+            if (!$this->_productHelper->isImportInFullStagingMode()) {
+                $values['created_in'] = new Expr(1);
+                $values['updated_in'] = new Expr(VersionManager::MAX_VERSION);
+                // When we are in full staging mode we will be using values put in the import file
+            }
+
+            $values['row_id'] = '_row_id';
+
+            /**
+             * When staging mode is enabled we also need to fill up the sequence_product table.
+             */
+            $sequenceValues = ['sequence_value' => '_entity_id'];
+            $parents = $connection->select()->from($tmpTable, $sequenceValues);
+            $connection->query(
+                $connection->insertFromSelect(
+                    $parents,
+                    $connection->getTableName('sequence_product'),
+                    array_keys($sequenceValues),
+                    1
+                )
+            );
+        }
+
         $parents = $connection->select()->from($tmpTable, $values);
         $connection->query(
             $connection->insertFromSelect(
-                $parents, $connection->getTableName('catalog_product_entity'), array_keys($values), 1
+                $parents,
+                $connection->getTableName('catalog_product_entity'),
+                array_keys($values),
+                1
             )
         );
+
+        if ($this->_productHelper->isCatalogStagingModulesEnabled()) {
+            /**
+             * Once the catalog_entity table has been filled, we need to get the row id's for all the new new
+             * versions so that we can insert the values after.
+             */
+            $connection->query(
+                'UPDATE `' . $tmpTable . '` t
+                SET `_row_id` = (
+                    SELECT MAX(row_id) FROM  `' . $connection->getTableName('catalog_product_entity') . '` c
+                    WHERE c.entity_id = t._entity_id
+                )
+                WHERE t._row_id IS NULL'
+            );
+        }
 
         $values = array(
             'created_at' => new Expr('now()')
@@ -522,8 +634,10 @@ class Import extends Factory
         }
 
         foreach($values as $storeId => $data) {
+            $identifierField =  $this->_productHelper->isCatalogStagingModulesEnabled() ? 'row_id' : 'entity_id';
+
             $this->_entities->setValues(
-                $this->getCode(), $connection->getTableName('catalog_product_entity'), $data, 4, $storeId, 1
+                $this->getCode(), $connection->getTableName('catalog_product_entity'), $data, 4, $storeId, 1, $identifierField
             );
         }
     }
@@ -535,6 +649,8 @@ class Import extends Factory
     {
         $connection = $this->_entities->getResource()->getConnection();
         $tmpTable = $this->_entities->getTableName($this->getCode());
+
+        $identifierAttribute = $this->_productHelper->isCatalogStagingModulesEnabled() ? '_row_id' : '_entity_id';
 
         if (!$this->moduleIsEnabled('Pimgento_Variant')) {
             $this->setStatus(false);
@@ -554,7 +670,7 @@ class Import extends Factory
                     ->from(
                         $tmpTable,
                         array(
-                            '_entity_id',
+                            $identifierAttribute,
                             '_axis',
                             '_children'
                         )
@@ -587,10 +703,11 @@ class Import extends Factory
 
                     /* catalog_product_super_attribute */
                     $values = array(
-                        'product_id' => $row['_entity_id'],
+                        'product_id' => $row[$identifierAttribute],
                         'attribute_id' => $id,
                         'position' => $position++,
                     );
+
                     $connection->insertOnDuplicate(
                         $connection->getTableName('catalog_product_super_attribute'), $values, array()
                     );
@@ -600,7 +717,7 @@ class Import extends Factory
                         $connection->select()
                             ->from($connection->getTableName('catalog_product_super_attribute'))
                             ->where('attribute_id = ?', $id)
-                            ->where('product_id = ?', $row['_entity_id'])
+                            ->where('product_id = ?', $row[$identifierAttribute])
                             ->limit(1)
                     );
 
@@ -635,7 +752,7 @@ class Import extends Factory
                         if ($childId) {
                             /* catalog_product_relation */
                             $values = array(
-                                'parent_id' => $row['_entity_id'],
+                                'parent_id' => $row[$identifierAttribute],
                                 'child_id' => $childId,
                             );
                             $connection->insertOnDuplicate(
@@ -645,7 +762,7 @@ class Import extends Factory
                             /* catalog_product_super_link */
                             $values = array(
                                 'product_id' => $childId,
-                                'parent_id' => $row['_entity_id'],
+                                'parent_id' => $row[$identifierAttribute],
                             );
                             $connection->insertOnDuplicate(
                                 $connection->getTableName('catalog_product_super_link'), $values, array()
@@ -1008,11 +1125,20 @@ class Import extends Factory
 
         // get the product ids for parents
         // @todo use Zend methods for mass update
-        $query = "
-            UPDATE $tableRelated, $tableProduct
-            SET $tableRelated.parent_id = $tableProduct.entity_id
-            WHERE $tableRelated.parent_sku = $tableProduct.sku
-        ";
+        // @TODO check if we can't do this in the insertFromSelect.
+        if ($this->_productHelper->isCatalogStagingModulesEnabled()) {
+            $query = "
+                UPDATE $tableRelated, $tmpTable
+                SET $tableRelated.parent_id = $tmpTable._row_id
+                WHERE $tableRelated.parent_sku = $tmpTable.sku
+            ";
+        } else {
+            $query = "
+                UPDATE $tableRelated, $tableProduct
+                SET $tableRelated.parent_id = $tableProduct.entity_id
+                WHERE $tableRelated.parent_sku = $tableProduct.sku
+            ";
+        }
         $connection->query($query);
 
         // get the product ids for links
@@ -1147,6 +1273,11 @@ class Import extends Factory
         $table->addColumn('media_cleaned', \Magento\Framework\DB\Ddl\Table::TYPE_TEXT, 255, []);
         $table->addColumn('media_value', \Magento\Framework\DB\Ddl\Table::TYPE_TEXT, 255, []);
         $table->addColumn('position', \Magento\Framework\DB\Ddl\Table::TYPE_INTEGER, 10, ['unsigned' => true]);
+
+        if ($this->_productHelper->isCatalogStagingModulesEnabled()) {
+            $table->addColumn('row_id', \Magento\Framework\DB\Ddl\Table::TYPE_INTEGER, 10, ['unsigned' => true]);
+        }
+
         $table->addIndex(
             $tableMedia.'_entity_id',
             ['entity_id'],
@@ -1213,23 +1344,29 @@ class Import extends Factory
             $attributeId = 'NULL';
         }
 
+        $cols = [
+            'sku'            => 't.sku',
+            'entity_id'      => 't._entity_id',
+            'attribute_id'   => new Expr($attributeId),
+            'store_id'       => new Expr('0'),
+            'media_original' => "t.$column",
+            'position'       => new Expr($position)
+        ];
+
+        if ($this->_productHelper->isCatalogStagingModulesEnabled()) {
+            $cols['row_id'] = 't._row_id';
+        }
+
         $select = $connection->select()
             ->from(
                 ['t' => $tmpTable],
-                [
-                    'sku'            => 't.sku',
-                    'entity_id'      => 't._entity_id',
-                    'attribute_id'   => new Expr($attributeId),
-                    'store_id'       => new Expr('0'),
-                    'media_original' => "t.$column",
-                    'position'       => new Expr($position)
-                ]
+                $cols
             )->where("`t`.`$column` <> ''");
 
         $query = $connection->insertFromSelect(
             $select,
             $tableMedia,
-            ['sku', 'entity_id', 'attribute_id', 'store_id', 'media_original', 'position'],
+            array_keys($cols),
             AdapterInterface::INSERT_ON_DUPLICATE
         );
 
@@ -1263,6 +1400,10 @@ class Import extends Factory
         $expr = "CONCAT_WS('/', '', SUBSTR(`media_value`, 1, 1), SUBSTR(`media_value`, 2, 1), `media_cleaned`)";
         $connection->update($tableMedia, ['media_value' => new Expr($expr)]);
 
+        /**
+         * @TODO in case of a full staging import wee needo to be sure our file name is unique
+         * in order to prevent different versions of the product to override the the files.
+         */
         $connection->addColumn(
             $tableMedia,
             'id',
@@ -1407,22 +1548,32 @@ class Import extends Factory
         $tableMedia = $connection->getTableName('tmp_pimgento_media');
         $step = 5000;
 
+        $cols = [
+            'attribute_id' => 'attribute_id',
+            'store_id'     => 'store_id',
+            'value'        => 'media_value',
+            'row_id'       => 'row_id'
+        ];
+
+        if ($this->_productHelper->isCatalogStagingModulesEnabled()) {
+            $cols['row_id'] = 'row_id';
+            $primary_id = 'row_id';
+        } else {
+            $cols['entity_id'] = 'entity_id';
+            $primary_id = 'entity_id';
+        }
+
         // add the media in the varchar product table
         $select = $connection->select()
             ->from(
                 ['t' => $tableMedia],
-                [
-                    'attribute_id' => 'attribute_id',
-                    'store_id'     => 'store_id',
-                    'entity_id'    => 'entity_id',
-                    'value'        => 'media_value',
-                ]
+                $cols
             )
             ->where('t.attribute_id is not null');
         $query = $connection->insertFromSelect(
             $select,
             $connection->getTableName('catalog_product_entity_varchar'),
-            ['attribute_id', 'store_id', 'entity_id', 'value'],
+            array_keys($cols),
             AdapterInterface::INSERT_ON_DUPLICATE
         );
         $connection->query($query);
@@ -1496,7 +1647,7 @@ class Import extends Factory
                 UPDATE $tableMedia, $tableGallery
                 SET $tableMedia.record_id = $tableGallery.record_id
                 WHERE $tableGallery.record_id >= $min AND $tableGallery.record_id < $max
-                AND $tableGallery.entity_id = $tableMedia.entity_id
+                AND $tableGallery.$primary_id = $tableMedia.$primary_id
                 AND $tableGallery.value_id = $tableMedia.value_id
                 AND $tableGallery.store_id = $tableMedia.store_id
             ";
@@ -1510,7 +1661,7 @@ class Import extends Factory
                 [
                     'value_id'  => 'value_id',
                     'store_id'  => new Expr('0'),
-                    'entity_id' => 'entity_id',
+                    $primary_id => $primary_id,
                     'label'     => new Expr("''"),
                     'position'  => 'position',
                 ]
@@ -1520,7 +1671,7 @@ class Import extends Factory
         $query = $connection->insertFromSelect(
             $select,
             $tableGallery,
-            ['value_id', 'store_id', 'entity_id', 'label', 'position'],
+            ['value_id', 'store_id', $primary_id, 'label', 'position'],
             AdapterInterface::INSERT_ON_DUPLICATE
         );
         $connection->query($query);
@@ -1534,13 +1685,13 @@ class Import extends Factory
                 ['t' => $tableMedia],
                 [
                     'value_id'  => 'value_id',
-                    'entity_id' => 'entity_id',
+                    $primary_id => $primary_id,
                 ]
             );
         $query = $connection->insertFromSelect(
             $select,
             $tableGallery,
-            ['value_id', 'entity_id'],
+            ['value_id', $primary_id],
             AdapterInterface::INSERT_IGNORE
         );
         $connection->query($query);

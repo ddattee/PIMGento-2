@@ -124,7 +124,7 @@ class AddPimgentoImportObserver extends AbstractAddImportObserver implements Obs
             ),
         );
 
-        $stepsAfter = array(
+        $stepsAfter = array(/*
             array(
                 'comment' => __('Drop temporary table'),
                 'method'  => 'dropTable',
@@ -136,7 +136,7 @@ class AddPimgentoImportObserver extends AbstractAddImportObserver implements Obs
             array(
                 'comment' => __('Clean cache'),
                 'method'  => 'cleanCache',
-            )
+            )*/
         );
 
         return array_merge(

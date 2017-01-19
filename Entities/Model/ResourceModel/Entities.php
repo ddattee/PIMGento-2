@@ -361,12 +361,13 @@ class Entities extends AbstractDb
      * @param int    $entityTypeId
      * @param int    $storeId
      * @param int    $mode
+     * @param string $identifierField
      * @return $this
      */
-    public function setValues($tableName, $entityTable, $values, $entityTypeId, $storeId, $mode = 1)
+    public function setValues($tableName, $entityTable, $values, $entityTypeId, $storeId, $mode = 1, $identifierField = 'entity_id')
     {
         $connection = $this->getConnection();
-        
+
         foreach ($values as $code => $value) {
             if (($attribute = $this->getAttribute($code, $entityTypeId))) {
                 if ($attribute['backend_type'] !== 'static') {
@@ -376,7 +377,7 @@ class Entities extends AbstractDb
                             array(
                                 'attribute_id'   => new Expr($attribute['attribute_id']),
                                 'store_id'       => new Expr($storeId),
-                                'entity_id'      => '_entity_id',
+                                $identifierField      => '_' . $identifierField,
                                 'value'          => $value
                             )
                         );
@@ -388,7 +389,7 @@ class Entities extends AbstractDb
                     $insert = $connection->insertFromSelect(
                         $select,
                         $connection->getTableName($entityTable . '_' . $backendType),
-                        array('attribute_id', 'store_id', 'entity_id', 'value'),
+                        array('attribute_id', 'store_id', $identifierField, 'value'),
                         $mode
                     );
                     $connection->query($insert);
@@ -401,7 +402,9 @@ class Entities extends AbstractDb
                             'value = ?' => '0000-00-00 00:00:00'
                         );
                         $connection->update(
-                            $connection->getTableName($entityTable . '_' . $backendType), $values, $where
+                            $connection->getTableName($entityTable . '_' . $backendType),
+                            $values,
+                            $where
                         );
                     }
                 }
