@@ -125,7 +125,7 @@ class Import extends Factory
              */
             $this->_entities->matchEntity($this->getCode(), 'code', 'sequence_catalog_category', 'sequence_value');
 
-            // Once the entitie id's are matched we can match the row ids.
+            // Once the entity id's are matched we can match the row ids.
             $this->matchRows();
 
         } else {

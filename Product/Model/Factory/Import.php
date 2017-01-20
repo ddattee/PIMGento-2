@@ -118,6 +118,11 @@ class Import extends Factory
             if ($this->_productHelper->isImportInFullStagingMode()) {
                 $requiredColumns[] = self::COLUMN_STAGING_CREATED_IN;
                 $requiredColumns[] = self::COLUMN_STAGING_UPDATE_IN;
+
+                // The full mode is not yet supported.so throw an error
+                $this->setContinue(false);
+                $this->setStatus(false);
+                $this->setMessage("Full staging mode isn't supported! Please use simple mode for now.");
             }
 
             $this->_entities->createTmpTableFromFile($file, $this->getCode(), $requiredColumns);
@@ -365,10 +370,6 @@ class Import extends Factory
                     WHERE c.entity_id = t._entity_id
                 )'
             );
-            /**
-             * @TODO it could be interesting to have different update rules. For example update current version
-             * or simply do an error if there are multiple versions.
-             */
         }
     }
 
@@ -1552,7 +1553,6 @@ class Import extends Factory
             'attribute_id' => 'attribute_id',
             'store_id'     => 'store_id',
             'value'        => 'media_value',
-            'row_id'       => 'row_id'
         ];
 
         if ($this->_helperConfig->isCatalogStagingModulesEnabled()) {

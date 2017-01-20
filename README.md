@@ -111,10 +111,23 @@ They must be in a folder *files* in the same folder of the simple product csv fi
 You can configure the columns to use in the Magento Catalog Pimgento configuration section.
 The value must be exactly the path of the image, relatively to the csv file: files/foo/bar.png
 
+## Staging support
+Pimgento is compatible with Magento EE Staging. It has 2 modes for updating products. 
+
+### Simple Mode
+In this mode pimgento will simply update the last version of the product or category that exists. 
+It won't change any other versions.
+
+### Full mode 
+*! Under Developpement!*
+ 
+In this mode you will need to have in your product csv file the additional fields `created_in` and `update_in`. 
+Those fields are going to be used to create new stages for the products during the import.
+
 ## Roadmap
 
 * Pim code exclusion
-* Compatibility with Magento EE 2.1 + Staging
+* Improve Magento EE 2.1 Staging support with full mode.
 
 ## About us
 

@@ -12,17 +12,17 @@ namespace Pimgento\Product\Model\Source;
 class StagingMode implements \Magento\Framework\Option\ArrayInterface
 {
     /**
-     * @var \Magento\Framework\Module\Manager
+     * @var \Pimgento\Import\Helper\Config
      */
     protected $configHelper;
 
     /**
      * PHP Constructor to get the module manager to be able to display proper options.
      *
-     * @param \Pimgento\Product\Helper\Config $configHelper
+     * @param \Pimgento\Import\Helper\Config $configHelper
      */
     public function __construct(
-        \Pimgento\Product\Helper\Config $configHelper
+        \Pimgento\Import\Helper\Config $configHelper
     ) {
         $this->configHelper = $configHelper;
     }
@@ -41,7 +41,7 @@ class StagingMode implements \Magento\Framework\Option\ArrayInterface
 
         // Allow full staging mode only if the catalog staging modules are enabled.
         if ($this->configHelper->isCatalogStagingModulesEnabled()) {
-            $options[] = ['value' => \Pimgento\Product\Helper\Config::STAGING_MODE_FULL, 'label' => __('Full')];
+            $options[] = ['value' => \Pimgento\Product\Helper\Config::STAGING_MODE_FULL, 'label' => __('Full (WIP)')];
         }
 
         return $options;
