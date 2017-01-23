@@ -122,6 +122,11 @@ class AddPimgentoImportObserver extends AbstractAddImportObserver implements Obs
                 'comment' => __('Import media files'),
                 'method'  => 'importMedia',
             ),
+            /* Step that will work only if staging enabled & certain options are selected. */
+            array(
+                'comment' => __('Update All stages'),
+                'method'  => 'updateAllStages',
+            ),
         );
 
         $stepsAfter = array(

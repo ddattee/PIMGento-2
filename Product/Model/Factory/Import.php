@@ -63,6 +63,11 @@ class Import extends Factory
     protected $_urlRewriteHelper;
 
     /**
+     * @var int
+     */
+    protected $startTime;
+
+    /**
      * PHP Constructor
      *
      * @param \Pimgento\Import\Helper\Config                     $helperConfig
@@ -106,6 +111,7 @@ class Import extends Factory
     public function createTable()
     {
         $file = $this->getFileFullPath();
+        $this->startTime = time();
 
         if (!is_file($file)) {
             $this->setContinue(false);
@@ -173,6 +179,8 @@ class Import extends Factory
 
         if ($this->_helperConfig->isCatalogStagingModulesEnabled()) {
             $connection->addColumn($tmpTable, '_row_id', 'INT(11)');
+            $connection->addColumn($tmpTable, 'created_in', 'INT(11)');
+            $connection->addColumn($tmpTable, 'updated_in', 'INT(11)');
         }
 
         if ($connection->tableColumnExists($tmpTable, 'type_id')) {
@@ -347,30 +355,67 @@ class Import extends Factory
      */
     protected function matchRows()
     {
-        if ($this->_productHelper->isImportInFullStagingMode()) {
-            /**
-             * @TODO this is a bit complicated as we need to find out if there is already a version with the current
-             * created_in & updated_in values and find the row id from there. We also need to create a new stage if
-             * required with the proper revert_id's.
-             */
-        } else {
+        $connection = $this->_entities->getResource()->getConnection();
+        $tmpTable = $this->_entities->getTableName($this->getCode());
+        $productTable = $this->_entities->getResource()->getTable('catalog_product_entity');
 
-            $connection = $this->_entities->getResource()->getConnection();
-            $tmpTable = $this->_entities->getTableName($this->getCode());
-            $productTable = $this->_entities->getResource()->getTable('catalog_product_entity');
+        switch ($this->_productHelper->getImportStagingMode()) {
+            case productHelper::STAGING_MODE_LAST:
+            case productHelper::STAGING_MODE_ALL:
+                /**
+                 * Update row id column.
+                 * We are going to update the last version that was created if there is multiple versions
+                 *
+                 * In full mode we will have another step that will duplicate the content in all the stages.
+                 */
+                $connection->query(
+                    'UPDATE `' . $tmpTable . '` t
+                    SET `_row_id` = (
+                        SELECT MAX(row_id) FROM  `' . $productTable . '` c
+                        WHERE c.entity_id = t._entity_id
+                    )'
+                );
 
-            /**
-             * Update row id column.
-             * We are going to update the last version that was created if there is multiple versions
-             */
-            $connection->query(
-                'UPDATE `' . $tmpTable . '` t
-                SET `_row_id` = (
-                    SELECT MAX(row_id) FROM  `' . $productTable . '` c
-                    WHERE c.entity_id = t._entity_id
-                )'
-            );
+                break;
+
+            case productHelper::STAGING_MODE_CURRENT:
+                /**
+                 * Update row id column.
+                 * We are going to update the current versions.
+                 */
+                $connection->query(
+                    'UPDATE `' . $tmpTable . '` t
+                    SET `_row_id` = (
+                        SELECT MAX(row_id) FROM  `' . $productTable . '` c
+                        WHERE c.entity_id = t._entity_id 
+                            AND ( ' . $this->startTime . ' BETWEEN created_in AND updated_in)
+                    )'
+                );
+
+                break;
         }
+
+
+        /**
+         * For existing versions fetch version created_in & updated_in from database.
+         */
+        $connection->query(
+            'UPDATE `' . $tmpTable . '` t
+            INNER JOIN  `' . $productTable . '` c ON c.row_id = t._row_id
+            SET t.created_in = c.created_in, 
+                t.updated_in = c.updated_in
+            WHERE t.created_in is NULL'
+        );
+
+        /**
+         * For new entities we need to put default created_in & updated_in values.
+         */
+        $connection->query(
+            'UPDATE `' . $tmpTable . '` t
+            SET `created_in` = 1, 
+                `updated_in` = ' . VersionManager::MAX_VERSION . '
+            WHERE t.created_in is NULL'
+        );
     }
 
     /**
@@ -497,12 +542,8 @@ class Import extends Factory
         );
 
         if ($this->_helperConfig->isCatalogStagingModulesEnabled()) {
-            if (!$this->_productHelper->isImportInFullStagingMode()) {
-                $values['created_in'] = new Expr(1);
-                $values['updated_in'] = new Expr(VersionManager::MAX_VERSION);
-                // When we are in full staging mode we will be using values put in the import file
-            }
-
+            $values['created_in'] =  'created_in';
+            $values['updated_in'] = 'updated_in';
             $values['row_id'] = '_row_id';
 
             /**
@@ -586,6 +627,8 @@ class Import extends Factory
             'family',
             'groups',
             'enabled',
+            'created_in',
+            'updated_in',
         );
 
         $values = array(
@@ -919,6 +962,82 @@ class Import extends Factory
         }
 
         $this->_urlRewriteHelper->dropUrlRewriteTmpTable();
+    }
+
+    /**
+     * Duplicate imported information in all the stages of the product.
+     */
+    public function updateAllStages()
+    {
+        if ($this->_productHelper->getImportStagingMode() == productHelper::STAGING_MODE_ALL) {
+            /**
+             * We need to update all stages for all attributes that have been imported.
+             */
+            $this->updateAllStageValues();
+
+
+
+            /**
+             * @TODO Still need to duplicate :
+             *      - medias
+             *      - configurable links
+             *      - related products.
+             */
+
+        }
+    }
+
+    /**
+     * Update values for all stages of imported products.
+     */
+    protected function updateAllStageValues()
+    {
+        $connection = $this->_entities->getResource()->getConnection();
+        $tmpTable = $this->_entities->getTableName($this->getCode());
+
+        $columns = array_keys($connection->describeTable($tmpTable));
+        $column[] = 'options_container';
+        $column[] = 'tax_class_id';
+        $column[] = 'visibility';
+
+        $except = array(
+            '_entity_id',
+            '_is_new',
+            '_status',
+            '_type_id',
+            '_options_container',
+            '_tax_class_id',
+            '_attribute_set_id',
+            '_visibility',
+            '_children',
+            '_axis',
+            'sku',
+            'categories',
+            'family',
+            'groups',
+            'enabled',
+            'created_in',
+            'updated_in',
+        );
+
+        if ($connection->tableColumnExists($tmpTable, 'enabled')) {
+            $column[] = 'status';
+        }
+
+        foreach ($columns as $column) {
+            if (in_array($column, $except)) {
+                continue;
+            }
+
+            if (preg_match('/-unit/', $column)) {
+                continue;
+            }
+
+            $columnPrefix = explode('-', $column);
+            $columnPrefix = reset($columnPrefix);
+
+            $this->_entities->getResource()->updateAllStageValues($tmpTable, $connection->getTableName('catalog_product_entity'), 4, $columnPrefix);
+        }
     }
 
     /**

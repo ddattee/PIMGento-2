@@ -13,7 +13,10 @@ class Config extends AbstractHelper
      */
     const CONFIG_PATH_STAGING_MODE = 'pimgento/product/staging_mode';
 
-    const STAGING_MODE_SIMPLE = 'simple';
+    const STAGING_MODE_DISABLED = 'disabled';
+    const STAGING_MODE_LAST = 'last';
+    const STAGING_MODE_CURRENT = 'current';
+    const STAGING_MODE_ALL = 'all';
     const STAGING_MODE_FULL = 'full';
 
     /**
@@ -94,7 +97,7 @@ class Config extends AbstractHelper
     {
 
         if (!$this->configHelper->isCatalogStagingModulesEnabled()) {
-            return self::STAGING_MODE_SIMPLE;
+            return self::STAGING_MODE_DISABLED;
         } else {
             return $this->scopeConfig->getValue(self::CONFIG_PATH_STAGING_MODE);
         }
