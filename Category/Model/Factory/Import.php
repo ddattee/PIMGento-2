@@ -94,6 +94,8 @@ class Import extends Factory
 
         if ($this->_helperConfig->isCatalogStagingModulesEnabled()) {
             $connection->addColumn($tmpTable, '_row_id', 'INT(11)');
+            $connection->addColumn($tmpTable, 'created_in', 'INT(11)');
+            $connection->addColumn($tmpTable, 'updated_in', 'INT(11)');
         }
     }
 
@@ -140,7 +142,7 @@ class Import extends Factory
     {
         $connection = $this->_entities->getResource()->getConnection();
         $tmpTable = $this->_entities->getTableName($this->getCode());
-        $productTable = $this->_entities->getResource()->getTable('catalog_category_entity');
+        $entityTable = $this->_entities->getResource()->getTable('catalog_category_entity');
 
         /**
          * Update row id column.
@@ -149,9 +151,30 @@ class Import extends Factory
         $connection->query(
             'UPDATE `' . $tmpTable . '` t
             SET `_row_id` = (
-                SELECT MAX(row_id) FROM  `' . $productTable . '` c
+                SELECT MAX(row_id) FROM  `' . $entityTable . '` c
                 WHERE c.entity_id = t._entity_id
             )'
+        );
+
+        /**
+         * For existing versions fetch version created_in & updated_in from database.
+         */
+        $connection->query(
+            'UPDATE `' . $tmpTable . '` t
+            INNER JOIN  `' . $entityTable . '` c ON c.row_id = t._row_id
+            SET t.created_in = c.created_in, 
+                t.updated_in = c.updated_in
+            WHERE t.created_in is NULL'
+        );
+
+        /**
+         * For new entities we need to put default created_in & updated_in values.
+         */
+        $connection->query(
+            'UPDATE `' . $tmpTable . '` t
+            SET `created_in` = 1, 
+                `updated_in` = ' . VersionManager::MAX_VERSION . '
+            WHERE t.created_in is NULL'
         );
     }
 
@@ -291,8 +314,8 @@ class Import extends Factory
         );
 
         if ($this->_helperConfig->isCatalogStagingModulesEnabled()) {
-            $values['created_in'] = new Expr(1);
-            $values['updated_in'] = new Expr(VersionManager::MAX_VERSION);
+            $values['created_in'] =  'created_in';
+            $values['updated_in'] = 'updated_in';
             $values['row_id'] = '_row_id';
 
             /**
