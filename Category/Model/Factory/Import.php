@@ -145,7 +145,7 @@ class Import extends Factory
                 $this->_entities,
                 'catalog_category_entity',
                 $this->getCode(),
-                StagingConfigHelper::STAGING_MODE_CURRENT
+                StagingConfigHelper::STAGING_MODE_LAST
             );
 
         } else {

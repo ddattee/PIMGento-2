@@ -51,7 +51,7 @@ class Import extends AbstractHelper
     }
 
     /**
-     * Matching the row id's for all our entities.
+     * Matching the row id's for all our entities using different rules depending on the staging mode.
      *
      * @param Entities $entities
      * @param string $entityTableCode
@@ -79,7 +79,7 @@ class Import extends AbstractHelper
                     'UPDATE `' . $tmpTable . '` t
                     SET `_row_id` = (
                         SELECT MAX(row_id) FROM  `' . $entityTable . '` c
-                        WHERE c.entity_id = t._entity_id
+                        WHERE c.entity_id = t._entity_id AND updated_in = ' . VersionManager::MAX_VERSION . '
                     )'
                 );
 
@@ -171,6 +171,10 @@ class Import extends AbstractHelper
     }
 
     /**
+     * Query to get all entity rows(stages) that has not been updated by the current import.
+     *
+     * Used to duplicate the data in all the stages.
+     *
      * @param AdapterInterface $connection
      * @param string $entityTable
      * @param string $tmpTable
@@ -183,10 +187,14 @@ class Import extends AbstractHelper
             ->from(
                 ['e' =>$entityTable],
                 []
-            )->joinInner(
+            )
+            // For each row we didn't update of the entities we have updated.
+            ->joinInner(
                 ['t' => $tmpTable],
                 't._entity_id = e.entity_id AND t._row_id != e.row_id',
                 []
-            )->setPart('disable_staging_preview', true);
+            )
+            // Prevent staging module preview that adds additional conditions
+            ->setPart('disable_staging_preview', true);
     }
 }
