@@ -975,14 +975,16 @@ class Import extends Factory
              */
             $this->updateAllStageValues();
 
-            $this->updateAllStageRelation();
+            $this->updateAllStageRelations();
+
+            $this->updateAllStageConfigurables();
+
+            $this->updateAllStageMedias();
 
             /**
              * @TODO Still need to duplicate :
              *      - medias
-             *      - configurable links
              */
-
         }
     }
 
@@ -1049,7 +1051,7 @@ class Import extends Factory
     /**
      * Duplicate relations between products for all stages.
      */
-    protected function updateAllStageRelation()
+    protected function updateAllStageRelations()
     {
         $connection = $this->_entities->getResource()->getConnection();
 
@@ -1079,6 +1081,130 @@ class Import extends Factory
             $select,
             $linkTable,
             array('product_id', 'linked_product_id', 'link_type_id'),
+            1
+        );
+        $connection->query($insert);
+    }
+
+    /**
+     * Duplicate relations for configurable products for all stages.
+     */
+    protected function updateAllStageConfigurables()
+    {
+        $connection = $this->_entities->getResource()->getConnection();
+
+        $tmpTable = $this->_entities->getTableName($this->getCode());
+        $entityTable = $connection->getTableName('catalog_product_entity');
+
+        $attributeTable = $connection->getTableName('catalog_product_super_attribute');
+        $labelTable = $connection->getTableName('catalog_product_super_attribute_label');
+        $relationTable = $connection->getTableName('catalog_product_relation');
+        $linkTable = $connection->getTableName('catalog_product_super_link');
+
+        $baseSelect = $connection->select()
+            ->from(
+                ['e' =>$entityTable],
+                []
+            )->joinInner(
+                ['t' => $tmpTable],
+                't._entity_id = e.entity_id AND t._row_id != e.row_id',
+                []
+            );
+        $baseSelect->setPart('disable_staging_preview', true);
+
+        /**
+         * Duplicating Data in catalog_product_super_attribute
+         */
+        $select = clone $baseSelect;
+        $select->joinInner(
+            ['u' => $attributeTable],
+            'u.product_id = t._row_id',
+            []
+        )->columns(['e.row_id', 'u.attribute_id', 'u.position']);
+
+        $insert = $connection->insertFromSelect(
+            $select,
+            $attributeTable,
+            array('product_id', 'attribute_id', 'position'),
+            1
+        );
+        $connection->query($insert);
+
+        /**
+         * Duplicating Data in catalog_product_super_attribute_label
+         * @TODO : This table requires the primart keys just inserted to the table super attribute. Need a way todo
+         * this properly.
+         */
+
+        /**
+         * Duplicating Data in catalog_product_relation
+         */
+        $select = clone $baseSelect;
+        $select->joinInner(
+            ['u' => $relationTable],
+            'u.parent_id = t._row_id',
+            []
+        )->columns(['e.row_id', 'u.child_id']);
+
+        $insert = $connection->insertFromSelect(
+            $select,
+            $relationTable,
+            array('parent_id', 'child_id'),
+            1
+        );
+        $connection->query($insert);
+        /**
+         * Duplicating Data in catalog_product_super_link
+         */
+        $select = clone $baseSelect;
+        $select->joinInner(
+            ['u' => $linkTable],
+            'u.parent_id = t._row_id',
+            []
+        )->columns(['e.row_id', 'u.product_id']);
+
+        $insert = $connection->insertFromSelect(
+            $select,
+            $linkTable,
+            array('parent_id', 'product_id'),
+            1
+        );
+        $connection->query($insert);
+    }
+
+    /**
+     * Duplicate medias between products for all stages.
+     */
+    protected function updateAllStageMedias()
+    {
+        $connection = $this->_entities->getResource()->getConnection();
+
+        $tmpTable = $this->_entities->getTableName($this->getCode());
+        $entityTable = $connection->getTableName('catalog_product_entity');
+        $mediaTable = $connection->getTableName('catalog_product_entity_media_gallery_value_to_entity');
+
+        $select = $connection->select()
+            ->from(
+                ['e' =>$entityTable],
+                []
+            )->joinInner(
+                ['t' => $tmpTable],
+                't._entity_id = e.entity_id AND t._row_id != e.row_id',
+                []
+            )->joinInner(
+                ['u' => $mediaTable],
+                'u.row_id = t._row_id',
+                []
+            );
+
+        $select->columns(['u.value_id', 'e.row_id']);
+
+        $select->setPart('disable_staging_preview', true);
+
+        $insert = $connection->insertFromSelect(
+            $select,
+            $mediaTable,
+            array('value_id', 'row_id'),
             1
         );
         $connection->query($insert);
