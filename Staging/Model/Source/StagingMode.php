@@ -1,16 +1,18 @@
 <?php
 
-namespace Pimgento\Product\Model\Source;
+
+namespace Pimgento\Staging\Model\Source;
 
 /**
  * Class To display different stating modes in the BO.
  *
  * @author    de Cramer Oliver<oldec@smile.fr>
  * @copyright 2017 Smile
- * @package Pimgento\Product\Model\Source
+ * @package Pimgento\Staging\Model\Source
  */
 class StagingMode implements \Magento\Framework\Option\ArrayInterface
 {
+
     /**
      * @var \Pimgento\Import\Helper\Config
      */

@@ -23,7 +23,7 @@
                 </field>
                 <field id="staging_mode" translate="label" type="select" sortOrder="40" showInDefault="1" showInWebsite="0" showInStore="0">
                     <label>Staging Mode</label>
-                    <source_model>Pimgento\Product\Model\Source\StagingMode</source_model>
+                    <source_model>Pimgento\Staging\Model\Source\StagingMode</source_model>
                     <comment>In full mode the product import expects version_from, version_to columns</comment>
                 </field>
             </group>

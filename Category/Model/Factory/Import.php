@@ -6,6 +6,7 @@ use Magento\Staging\Model\VersionManager;
 use \Pimgento\Import\Model\Factory;
 use \Pimgento\Entities\Model\Entities;
 use \Pimgento\Import\Helper\Config as helperConfig;
+use \Pimgento\Staging\Helper\Config as StagingConfigHelper;
 use \Pimgento\Import\Helper\UrlRewrite as urlRewriteHelper;
 use \Magento\Framework\Event\ManagerInterface;
 use \Magento\Catalog\Model\Category;
@@ -39,6 +40,11 @@ class Import extends Factory
     protected $_urlRewriteHelper;
 
     /**
+     * @var StagingConfigHelper
+     */
+    protected $stagingConfigHelper;
+
+    /**
      * @param \Pimgento\Entities\Model\Entities $entities
      * @param \Pimgento\Import\Helper\Config $helperConfig
      * @param \Magento\Framework\Module\Manager $moduleManager
@@ -47,6 +53,7 @@ class Import extends Factory
      * @param \Magento\Catalog\Model\Category $category
      * @param \Magento\Framework\App\Cache\TypeListInterface $cacheTypeList
      * @param urlRewriteHelper $urlRewriteHelper
+     * @param StagingConfigHelper $stagingConfigHelper
      * @param array $data
      */
     public function __construct(
@@ -58,6 +65,7 @@ class Import extends Factory
         Category $category,
         TypeListInterface $cacheTypeList,
         urlRewriteHelper $urlRewriteHelper,
+        StagingConfigHelper $stagingConfigHelper,
         array $data = []
     )
     {
@@ -66,6 +74,7 @@ class Import extends Factory
         $this->_category = $category;
         $this->_cacheTypeList = $cacheTypeList;
         $this->_urlRewriteHelper = $urlRewriteHelper;
+        $this->stagingConfigHelper = $stagingConfigHelper;
     }
 
     /**
@@ -92,7 +101,7 @@ class Import extends Factory
         $connection = $this->_entities->getResource()->getConnection();
         $tmpTable = $this->_entities->getTableName($this->getCode());
 
-        if ($this->_helperConfig->isCatalogStagingModulesEnabled()) {
+        if ($this->stagingConfigHelper->isCatalogStagingModulesEnabled()) {
             $connection->addColumn($tmpTable, '_row_id', 'INT(11)');
             $connection->addColumn($tmpTable, 'created_in', 'INT(11)');
             $connection->addColumn($tmpTable, 'updated_in', 'INT(11)');
@@ -118,7 +127,7 @@ class Import extends Factory
      */
     public function matchEntity()
     {
-        if ($this->_helperConfig->isCatalogStagingModulesEnabled()) {
+        if ($this->stagingConfigHelper->isCatalogStagingModulesEnabled()) {
             /**
              * When using staging module entity id's are not the primary key of the catalog_product_entity
              * table anymore. The new primary keys is row_id. Before we get information on the row_id, we still
@@ -313,7 +322,7 @@ class Import extends Factory
             'children_count'   => new Expr('0'),
         );
 
-        if ($this->_helperConfig->isCatalogStagingModulesEnabled()) {
+        if ($this->stagingConfigHelper->isCatalogStagingModulesEnabled()) {
             $values['created_in'] =  'created_in';
             $values['updated_in'] = 'updated_in';
             $values['row_id'] = '_row_id';
@@ -343,7 +352,7 @@ class Import extends Factory
             )
         );
 
-        if ($this->_helperConfig->isCatalogStagingModulesEnabled()) {
+        if ($this->stagingConfigHelper->isCatalogStagingModulesEnabled()) {
             /**
              * Once the catalog_entity table has been filled, we need to get the row id's for all the new new
              * versions so that we can insert the values after.
@@ -379,7 +388,7 @@ class Import extends Factory
             'display_mode'    => new Expr('"PRODUCTS"'),
         );
 
-        $identifierField =  $this->_helperConfig->isCatalogStagingModulesEnabled() ? 'row_id' : 'entity_id';
+        $identifierField =  $this->stagingConfigHelper->isCatalogStagingModulesEnabled() ? 'row_id' : 'entity_id';
 
         $this->_entities->setValues(
             $this->getCode(), $connection->getTableName('catalog_category_entity'), $values, 3, 0, 2, $identifierField

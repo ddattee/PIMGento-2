@@ -5,19 +5,14 @@ namespace Pimgento\Product\Helper;
 use \Magento\Framework\App\Helper\AbstractHelper;
 use \Magento\Framework\App\Helper\Context;
 use \Magento\Store\Model\StoreManagerInterface;
+use \Pimgento\Staging\Helper\Config as StagingConfigHelper;
 
 class Config extends AbstractHelper
 {
     /**
-     * Constants to configuration paths.
+     * Constants to configuration profile.
      */
-    const CONFIG_PATH_STAGING_MODE = 'pimgento/product/staging_mode';
-
-    const STAGING_MODE_DISABLED = 'disabled';
-    const STAGING_MODE_LAST = 'last';
-    const STAGING_MODE_CURRENT = 'current';
-    const STAGING_MODE_ALL = 'all';
-    const STAGING_MODE_FULL = 'full';
+    const CONFIG_PROFILE = 'product';
 
     /**
      * @var \Magento\Store\Model\StoreManagerInterface
@@ -27,7 +22,7 @@ class Config extends AbstractHelper
     /**
      * @var \Pimgento\Import\Helper\Config
      */
-    protected $configHelper;
+    protected $stagingConfigHelper;
 
     /**
      * @param \Magento\Framework\App\Helper\Context $context
@@ -36,10 +31,10 @@ class Config extends AbstractHelper
     public function __construct(
         Context $context,
         StoreManagerInterface $storeManager,
-        \Pimgento\Import\Helper\Config $configHelper
+        StagingConfigHelper $statingConfigHelper
     ) {
         $this->_storeManager = $storeManager;
-        $this->configHelper = $configHelper;
+        $this->stagingConfigHelper = $statingConfigHelper;
 
         parent::__construct($context);
     }
@@ -96,11 +91,7 @@ class Config extends AbstractHelper
     public function getImportStagingMode()
     {
 
-        if (!$this->configHelper->isCatalogStagingModulesEnabled()) {
-            return self::STAGING_MODE_DISABLED;
-        } else {
-            return $this->scopeConfig->getValue(self::CONFIG_PATH_STAGING_MODE);
-        }
+        return $this->stagingConfigHelper->getImportStagingMode(self::CONFIG_PROFILE);
     }
 
     /**
@@ -110,6 +101,6 @@ class Config extends AbstractHelper
      */
     public function isImportInFullStagingMode()
     {
-        return $this->getImportStagingMode() == self::STAGING_MODE_FULL;
+        return $this->getImportStagingMode() == StagingConfigHelper::STAGING_MODE_FULL;
     }
 }
