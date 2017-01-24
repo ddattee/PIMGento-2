@@ -8,6 +8,7 @@ use \Pimgento\Entities\Model\Entities;
 use \Pimgento\Import\Helper\Config as helperConfig;
 use \Pimgento\Import\Helper\UrlRewrite as urlRewriteHelper;
 use \Pimgento\Staging\Helper\Config as StagingConfigHelper;
+use \Pimgento\Staging\Helper\Import as StagingHelper;
 use \Pimgento\Product\Helper\Config as productHelper;
 use \Pimgento\Product\Helper\Media as mediaHelper;
 use \Magento\Catalog\Model\Product\Link as Link;
@@ -69,9 +70,9 @@ class Import extends Factory
     protected $stagingConfigHelper;
 
     /**
-     * @var int
+     * @var StagingHelper
      */
-    protected $startTime;
+    protected $stagingHelper;
 
     /**
      * PHP Constructor
@@ -87,6 +88,7 @@ class Import extends Factory
      * @param \Pimgento\Product\Helper\Media                     $mediaHelper
      * @param urlRewriteHelper                                   $urlRewriteHelper
      * @param StagingConfigHelper                                $stagingConfigHelper
+     * @param StagingHelper                                      $stagingHelper
      * @param array                                              $data
      */
     public function __construct(
@@ -101,6 +103,7 @@ class Import extends Factory
         mediaHelper $mediaHelper,
         urlRewriteHelper $urlRewriteHelper,
         StagingConfigHelper $stagingConfigHelper,
+        StagingHelper $stagingHelper,
         array $data = []
     ) {
         parent::__construct($helperConfig, $eventManager, $moduleManager, $scopeConfig, $data);
@@ -112,6 +115,7 @@ class Import extends Factory
         $this->_mediaHelper = $mediaHelper;
         $this->_urlRewriteHelper = $urlRewriteHelper;
         $this->stagingConfigHelper = $stagingConfigHelper;
+        $this->stagingHelper = $stagingHelper;
     }
 
     /**
@@ -120,7 +124,6 @@ class Import extends Factory
     public function createTable()
     {
         $file = $this->getFileFullPath();
-        $this->startTime = time();
 
         if (!is_file($file)) {
             $this->setContinue(false);
@@ -186,11 +189,7 @@ class Import extends Factory
             $connection->update($tmpTable, array('_visibility' => new Expr('IF(`groups` <> "", 1, 4)')));
         }
 
-        if ($this->stagingConfigHelper->isCatalogStagingModulesEnabled()) {
-            $connection->addColumn($tmpTable, '_row_id', 'INT(11)');
-            $connection->addColumn($tmpTable, 'created_in', 'INT(11)');
-            $connection->addColumn($tmpTable, 'updated_in', 'INT(11)');
-        }
+        $this->stagingHelper->addRequiredData($connection, $tmpTable);
 
         if ($connection->tableColumnExists($tmpTable, 'type_id')) {
             $types = $connection->quote($this->_allowedTypeId);
@@ -352,79 +351,16 @@ class Import extends Factory
             $this->_entities->matchEntity($this->getCode(), 'sku', 'sequence_product', 'sequence_value');
 
             // Once the entitie id's are matched we can match the row ids.
-            $this->matchRows();
+            $this->stagingHelper->matchEntityRows(
+                $this->_entities,
+                'catalog_product_entity',
+                $this->getCode(),
+                $this->_productHelper->getImportStagingMode()
+            );
 
         } else {
             $this->_entities->matchEntity($this->getCode(), 'sku', 'catalog_product_entity', 'entity_id');
         }
-    }
-
-    /**
-     * Matching the row id's for all our entities.
-     */
-    protected function matchRows()
-    {
-        $connection = $this->_entities->getResource()->getConnection();
-        $tmpTable = $this->_entities->getTableName($this->getCode());
-        $productTable = $this->_entities->getResource()->getTable('catalog_product_entity');
-
-        switch ($this->_productHelper->getImportStagingMode()) {
-            case StagingConfigHelper::STAGING_MODE_LAST:
-            case StagingConfigHelper::STAGING_MODE_ALL:
-                /**
-                 * Update row id column.
-                 * We are going to update the last version that was created if there is multiple versions
-                 *
-                 * In full mode we will have another step that will duplicate the content in all the stages.
-                 */
-                $connection->query(
-                    'UPDATE `' . $tmpTable . '` t
-                    SET `_row_id` = (
-                        SELECT MAX(row_id) FROM  `' . $productTable . '` c
-                        WHERE c.entity_id = t._entity_id
-                    )'
-                );
-
-                break;
-
-            case StagingConfigHelper::STAGING_MODE_CURRENT:
-                /**
-                 * Update row id column.
-                 * We are going to update the current versions.
-                 */
-                $connection->query(
-                    'UPDATE `' . $tmpTable . '` t
-                    SET `_row_id` = (
-                        SELECT MAX(row_id) FROM  `' . $productTable . '` c
-                        WHERE c.entity_id = t._entity_id 
-                            AND ( ' . $this->startTime . ' BETWEEN created_in AND updated_in)
-                    )'
-                );
-
-                break;
-        }
-
-
-        /**
-         * For existing versions fetch version created_in & updated_in from database.
-         */
-        $connection->query(
-            'UPDATE `' . $tmpTable . '` t
-            INNER JOIN  `' . $productTable . '` c ON c.row_id = t._row_id
-            SET t.created_in = c.created_in, 
-                t.updated_in = c.updated_in
-            WHERE t.created_in is NULL'
-        );
-
-        /**
-         * For new entities we need to put default created_in & updated_in values.
-         */
-        $connection->query(
-            'UPDATE `' . $tmpTable . '` t
-            SET `created_in` = 1, 
-                `updated_in` = ' . VersionManager::MAX_VERSION . '
-            WHERE t.created_in is NULL'
-        );
     }
 
     /**
@@ -554,21 +490,9 @@ class Import extends Factory
             $values['created_in'] =  'created_in';
             $values['updated_in'] = 'updated_in';
             $values['row_id'] = '_row_id';
-
-            /**
-             * When staging mode is enabled we also need to fill up the sequence_product table.
-             */
-            $sequenceValues = ['sequence_value' => '_entity_id'];
-            $parents = $connection->select()->from($tmpTable, $sequenceValues);
-            $connection->query(
-                $connection->insertFromSelect(
-                    $parents,
-                    $connection->getTableName('sequence_product'),
-                    array_keys($sequenceValues),
-                    1
-                )
-            );
         }
+
+        $this->stagingHelper->createEntitiesBefore($connection, 'sequence_product', $tmpTable);
 
         $parents = $connection->select()->from($tmpTable, $values);
         $connection->query(
@@ -580,20 +504,7 @@ class Import extends Factory
             )
         );
 
-        if ($this->stagingConfigHelper->isCatalogStagingModulesEnabled()) {
-            /**
-             * Once the catalog_entity table has been filled, we need to get the row id's for all the new new
-             * versions so that we can insert the values after.
-             */
-            $connection->query(
-                'UPDATE `' . $tmpTable . '` t
-                SET `_row_id` = (
-                    SELECT MAX(row_id) FROM  `' . $connection->getTableName('catalog_product_entity') . '` c
-                    WHERE c.entity_id = t._entity_id
-                )
-                WHERE t._row_id IS NULL'
-            );
-        }
+        $this->stagingHelper->createEntitiesAfter($connection, 'catalog_product_entity', $tmpTable);
 
         $values = array(
             'created_at' => new Expr('now()')
@@ -1043,7 +954,7 @@ class Import extends Factory
 
             $this->_entities
                 ->getResource()
-                ->updateAllStageValues(
+                ->updateAllStageValues (
                     $tmpTable,
                     $connection->getTableName('catalog_product_entity'),
                     4,
@@ -1063,19 +974,12 @@ class Import extends Factory
         $entityTable = $connection->getTableName('catalog_product_entity');
         $linkTable = $connection->getTableName('catalog_product_link');
 
-        $select = $connection->select()
-            ->from(
-                ['e' =>$entityTable],
-                []
-            )->joinInner(
-                ['t' => $tmpTable],
-                't._entity_id = e.entity_id AND t._row_id != e.row_id',
-                []
-            )->joinInner(
-                ['u' => $linkTable],
-                'u.product_id = t._row_id',
-                []
-            );
+        $select = $this->stagingHelper->getBaseStageDuplicationSelect($connection, $entityTable, $tmpTable);
+        $select->joinInner(
+            ['u' => $linkTable],
+            'u.product_id = t._row_id',
+            []
+        );
 
         $select->columns(['e.row_id', 'u.linked_product_id', 'u.link_type_id']);
 
@@ -1105,16 +1009,7 @@ class Import extends Factory
         $relationTable = $connection->getTableName('catalog_product_relation');
         $linkTable = $connection->getTableName('catalog_product_super_link');
 
-        $baseSelect = $connection->select()
-            ->from(
-                ['e' =>$entityTable],
-                []
-            )->joinInner(
-                ['t' => $tmpTable],
-                't._entity_id = e.entity_id AND t._row_id != e.row_id',
-                []
-            );
-        $baseSelect->setPart('disable_staging_preview', true);
+        $baseSelect = $this->stagingHelper->getBaseStageDuplicationSelect($connection, $entityTable, $tmpTable);
 
         /**
          * Duplicating Data in catalog_product_super_attribute
@@ -1187,19 +1082,12 @@ class Import extends Factory
         $entityTable = $connection->getTableName('catalog_product_entity');
         $mediaTable = $connection->getTableName('catalog_product_entity_media_gallery_value_to_entity');
 
-        $select = $connection->select()
-            ->from(
-                ['e' =>$entityTable],
-                []
-            )->joinInner(
-                ['t' => $tmpTable],
-                't._entity_id = e.entity_id AND t._row_id != e.row_id',
-                []
-            )->joinInner(
-                ['u' => $mediaTable],
-                'u.row_id = t._row_id',
-                []
-            );
+        $select = $this->stagingHelper->getBaseStageDuplicationSelect($connection, $entityTable, $tmpTable);
+        $select->joinInner(
+            ['u' => $mediaTable],
+            'u.row_id = t._row_id',
+            []
+        );
 
         $select->columns(['u.value_id', 'e.row_id']);
 

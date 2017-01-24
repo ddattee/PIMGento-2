@@ -7,6 +7,7 @@ use \Pimgento\Import\Model\Factory;
 use \Pimgento\Entities\Model\Entities;
 use \Pimgento\Import\Helper\Config as helperConfig;
 use \Pimgento\Staging\Helper\Config as StagingConfigHelper;
+use \Pimgento\Staging\Helper\Import as StagingHelper;
 use \Pimgento\Import\Helper\UrlRewrite as urlRewriteHelper;
 use \Magento\Framework\Event\ManagerInterface;
 use \Magento\Catalog\Model\Category;
@@ -14,7 +15,6 @@ use \Magento\Framework\App\Cache\TypeListInterface;
 use \Magento\Framework\Module\Manager as moduleManager;
 use \Magento\Framework\App\Config\ScopeConfigInterface as scopeConfig;
 use \Zend_Db_Expr as Expr;
-use \Exception;
 
 class Import extends Factory
 {
@@ -40,6 +40,11 @@ class Import extends Factory
     protected $_urlRewriteHelper;
 
     /**
+     * @var StagingHelper
+     */
+    protected $stagingHelper;
+
+    /**
      * @var StagingConfigHelper
      */
     protected $stagingConfigHelper;
@@ -54,6 +59,7 @@ class Import extends Factory
      * @param \Magento\Framework\App\Cache\TypeListInterface $cacheTypeList
      * @param urlRewriteHelper $urlRewriteHelper
      * @param StagingConfigHelper $stagingConfigHelper
+    *  @param StagingHelper $stagingHelper
      * @param array $data
      */
     public function __construct(
@@ -66,6 +72,7 @@ class Import extends Factory
         TypeListInterface $cacheTypeList,
         urlRewriteHelper $urlRewriteHelper,
         StagingConfigHelper $stagingConfigHelper,
+        StagingHelper $stagingHelper,
         array $data = []
     )
     {
@@ -75,6 +82,7 @@ class Import extends Factory
         $this->_cacheTypeList = $cacheTypeList;
         $this->_urlRewriteHelper = $urlRewriteHelper;
         $this->stagingConfigHelper = $stagingConfigHelper;
+        $this->stagingHelper = $stagingHelper;
     }
 
     /**
@@ -101,11 +109,7 @@ class Import extends Factory
         $connection = $this->_entities->getResource()->getConnection();
         $tmpTable = $this->_entities->getTableName($this->getCode());
 
-        if ($this->stagingConfigHelper->isCatalogStagingModulesEnabled()) {
-            $connection->addColumn($tmpTable, '_row_id', 'INT(11)');
-            $connection->addColumn($tmpTable, 'created_in', 'INT(11)');
-            $connection->addColumn($tmpTable, 'updated_in', 'INT(11)');
-        }
+        $this->stagingHelper->addRequiredData($connection, $tmpTable);
     }
 
     /**
@@ -136,55 +140,17 @@ class Import extends Factory
              */
             $this->_entities->matchEntity($this->getCode(), 'code', 'sequence_catalog_category', 'sequence_value');
 
-            // Once the entity id's are matched we can match the row ids.
-            $this->matchRows();
+            // Once the entitie id's are matched we can match the row ids.
+            $this->stagingHelper->matchEntityRows(
+                $this->_entities,
+                'catalog_category_entity',
+                $this->getCode(),
+                StagingConfigHelper::STAGING_MODE_CURRENT
+            );
 
         } else {
             $this->_entities->matchEntity($this->getCode(), 'code', 'catalog_category_entity', 'entity_id');
         }
-    }
-
-    /**
-     * Matching the row id's for all our entities.
-     */
-    protected function matchRows()
-    {
-        $connection = $this->_entities->getResource()->getConnection();
-        $tmpTable = $this->_entities->getTableName($this->getCode());
-        $entityTable = $this->_entities->getResource()->getTable('catalog_category_entity');
-
-        /**
-         * Update row id column.
-         * We are going to update the last version that was created if there is multiple versions
-         */
-        $connection->query(
-            'UPDATE `' . $tmpTable . '` t
-            SET `_row_id` = (
-                SELECT MAX(row_id) FROM  `' . $entityTable . '` c
-                WHERE c.entity_id = t._entity_id
-            )'
-        );
-
-        /**
-         * For existing versions fetch version created_in & updated_in from database.
-         */
-        $connection->query(
-            'UPDATE `' . $tmpTable . '` t
-            INNER JOIN  `' . $entityTable . '` c ON c.row_id = t._row_id
-            SET t.created_in = c.created_in, 
-                t.updated_in = c.updated_in
-            WHERE t.created_in is NULL'
-        );
-
-        /**
-         * For new entities we need to put default created_in & updated_in values.
-         */
-        $connection->query(
-            'UPDATE `' . $tmpTable . '` t
-            SET `created_in` = 1, 
-                `updated_in` = ' . VersionManager::MAX_VERSION . '
-            WHERE t.created_in is NULL'
-        );
     }
 
     /**
@@ -326,21 +292,9 @@ class Import extends Factory
             $values['created_in'] =  'created_in';
             $values['updated_in'] = 'updated_in';
             $values['row_id'] = '_row_id';
-
-            /**
-             * When staging mode is enabled we also need to fill up the sequence_product table.
-             */
-            $sequenceValues = ['sequence_value' => '_entity_id'];
-            $parents = $connection->select()->from($tmpTable, $sequenceValues);
-            $connection->query(
-                $connection->insertFromSelect(
-                    $parents,
-                    $connection->getTableName('sequence_catalog_category'),
-                    array_keys($sequenceValues),
-                    1
-                )
-            );
         }
+
+        $this->stagingHelper->createEntitiesBefore($connection, 'sequence_catalog_category', $tmpTable);
 
         $parents = $connection->select()->from($tmpTable, $values);
         $connection->query(
@@ -352,20 +306,7 @@ class Import extends Factory
             )
         );
 
-        if ($this->stagingConfigHelper->isCatalogStagingModulesEnabled()) {
-            /**
-             * Once the catalog_entity table has been filled, we need to get the row id's for all the new new
-             * versions so that we can insert the values after.
-             */
-            $connection->query(
-                'UPDATE `' . $tmpTable . '` t
-                SET `_row_id` = (
-                    SELECT MAX(row_id) FROM  `' . $connection->getTableName('catalog_category_entity') . '` c
-                    WHERE c.entity_id = t._entity_id
-                )
-                WHERE t._row_id IS NULL'
-            );
-        }
+        $this->stagingHelper->createEntitiesAfter($connection, 'catalog_category_entity', $tmpTable);
 
         $values = array(
             'created_at' => new Expr('now()')
