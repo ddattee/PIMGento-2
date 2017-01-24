@@ -451,7 +451,7 @@ class Entities extends AbstractDb
 
                 $insert = $connection->insertFromSelect(
                     $select,
-                    $connection->getTableName($attributeTable),
+                    $attributeTable,
                     array('attribute_id', 'store_id', 'row_id', 'value'),
                     1
                 );

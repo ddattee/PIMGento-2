@@ -975,13 +975,12 @@ class Import extends Factory
              */
             $this->updateAllStageValues();
 
-
+            $this->updateAllStageRelation();
 
             /**
              * @TODO Still need to duplicate :
              *      - medias
              *      - configurable links
-             *      - related products.
              */
 
         }
@@ -1036,8 +1035,53 @@ class Import extends Factory
             $columnPrefix = explode('-', $column);
             $columnPrefix = reset($columnPrefix);
 
-            $this->_entities->getResource()->updateAllStageValues($tmpTable, $connection->getTableName('catalog_product_entity'), 4, $columnPrefix);
+            $this->_entities
+                ->getResource()
+                ->updateAllStageValues(
+                    $tmpTable,
+                    $connection->getTableName('catalog_product_entity'),
+                    4,
+                    $columnPrefix
+                );
         }
+    }
+
+    /**
+     * Duplicate relations between products for all stages.
+     */
+    protected function updateAllStageRelation()
+    {
+        $connection = $this->_entities->getResource()->getConnection();
+
+        $tmpTable = $this->_entities->getTableName($this->getCode());
+        $entityTable = $connection->getTableName('catalog_product_entity');
+        $linkTable = $connection->getTableName('catalog_product_link');
+
+        $select = $connection->select()
+            ->from(
+                ['e' =>$entityTable],
+                []
+            )->joinInner(
+                ['t' => $tmpTable],
+                't._entity_id = e.entity_id AND t._row_id != e.row_id',
+                []
+            )->joinInner(
+                ['u' => $linkTable],
+                'u.product_id = t._row_id',
+                []
+            );
+
+        $select->columns(['e.row_id', 'u.linked_product_id', 'u.link_type_id']);
+
+        $select->setPart('disable_staging_preview', true);
+
+        $insert = $connection->insertFromSelect(
+            $select,
+            $linkTable,
+            array('product_id', 'linked_product_id', 'link_type_id'),
+            1
+        );
+        $connection->query($insert);
     }
 
     /**
