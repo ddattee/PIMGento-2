@@ -1031,9 +1031,29 @@ class Import extends Factory
 
         /**
          * Duplicating Data in catalog_product_super_attribute_label
-         * @TODO : This table requires the primart keys just inserted to the table super attribute. Need a way todo
-         * this properly.
          */
+        $select = clone $baseSelect;
+        $select->joinInner(
+            ['u_new' => $attributeTable],
+            'u_new.product_id = e.row_id',
+            []
+        )->joinInner(
+            ['u_source' => $attributeTable],
+            'u_source.product_id = t._row_id',
+            []
+        )->joinInner(
+            ['l_source' => $labelTable],
+            'l_source.product_super_attribute_id = u_source.product_super_attribute_id',
+            []
+        )->columns(['u_new.product_super_attribute_id', 'l_source.store_id', 'l_source.use_default', 'l_source.value']);
+
+        $insert = $connection->insertFromSelect(
+            $select,
+            $labelTable,
+            array('product_super_attribute_id', 'store_id', 'use_default', 'value'),
+            1
+        );
+        $connection->query($insert);
 
         /**
          * Duplicating Data in catalog_product_relation
@@ -1582,10 +1602,6 @@ class Import extends Factory
         $expr = "CONCAT_WS('/', '', SUBSTR(`media_value`, 1, 1), SUBSTR(`media_value`, 2, 1), `media_cleaned`)";
         $connection->update($tableMedia, ['media_value' => new Expr($expr)]);
 
-        /**
-         * @TODO in case of a full staging import wee needo to be sure our file name is unique
-         * in order to prevent different versions of the product to override the the files.
-         */
         $connection->addColumn(
             $tableMedia,
             'id',
