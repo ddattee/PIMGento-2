@@ -8,6 +8,7 @@ use \Pimgento\Entities\Model\Entities;
 use \Pimgento\Import\Helper\Config as helperConfig;
 use \Pimgento\Import\Helper\UrlRewrite as urlRewriteHelper;
 use \Pimgento\Staging\Helper\Config as StagingConfigHelper;
+use \Pimgento\Product\Helper\Staging as StagingProductHelper;
 use \Pimgento\Staging\Helper\Import as StagingHelper;
 use \Pimgento\Product\Helper\Config as productHelper;
 use \Pimgento\Product\Helper\Media as mediaHelper;
@@ -75,6 +76,11 @@ class Import extends Factory
     protected $stagingHelper;
 
     /**
+     * @var StagingProductHelper
+     */
+    protected $stagingProductHelper;
+
+    /**
      * PHP Constructor
      *
      * @param \Pimgento\Import\Helper\Config                     $helperConfig
@@ -89,6 +95,7 @@ class Import extends Factory
      * @param urlRewriteHelper                                   $urlRewriteHelper
      * @param StagingConfigHelper                                $stagingConfigHelper
      * @param StagingHelper                                      $stagingHelper
+     * @param StagingProductHelper                               $stagingProductHelper
      * @param array                                              $data
      */
     public function __construct(
@@ -104,6 +111,7 @@ class Import extends Factory
         urlRewriteHelper $urlRewriteHelper,
         StagingConfigHelper $stagingConfigHelper,
         StagingHelper $stagingHelper,
+        StagingProductHelper $stagingProductHelper,
         array $data = []
     ) {
         parent::__construct($helperConfig, $eventManager, $moduleManager, $scopeConfig, $data);
@@ -116,6 +124,7 @@ class Import extends Factory
         $this->_urlRewriteHelper = $urlRewriteHelper;
         $this->stagingConfigHelper = $stagingConfigHelper;
         $this->stagingHelper = $stagingHelper;
+        $this->stagingProductHelper = $stagingProductHelper;
     }
 
     /**
@@ -890,236 +899,20 @@ class Import extends Factory
     public function updateAllStages()
     {
         if ($this->_productHelper->getImportStagingMode() == StagingConfigHelper::STAGING_MODE_ALL) {
+
+            $tmpTable = $this->_entities->getTableName($this->getCode());
+
             /**
              * We need to update all stages for all attributes that have been imported.
              */
-            $this->updateAllStageValues();
+            $this->stagingProductHelper->updateAllStageValues($this->_entities, $tmpTable);
 
-            $this->updateAllStageRelations();
+            $this->stagingProductHelper->updateAllStageRelations($this->_entities, $tmpTable);
 
-            $this->updateAllStageConfigurables();
+            $this->stagingProductHelper->updateAllStageConfigurables($this->_entities, $tmpTable);
 
-            $this->updateAllStageMedias();
+            $this->stagingProductHelper->updateAllStageMedias($this->_entities, $tmpTable);
         }
-    }
-
-    /**
-     * Update values for all stages of imported products.
-     */
-    protected function updateAllStageValues()
-    {
-        $connection = $this->_entities->getResource()->getConnection();
-        $tmpTable = $this->_entities->getTableName($this->getCode());
-
-        $columns = array_keys($connection->describeTable($tmpTable));
-        $column[] = 'options_container';
-        $column[] = 'tax_class_id';
-        $column[] = 'visibility';
-
-        $except = array(
-            '_entity_id',
-            '_is_new',
-            '_status',
-            '_type_id',
-            '_options_container',
-            '_tax_class_id',
-            '_attribute_set_id',
-            '_visibility',
-            '_children',
-            '_axis',
-            'sku',
-            'categories',
-            'family',
-            'groups',
-            'enabled',
-            'created_in',
-            'updated_in',
-        );
-
-        if ($connection->tableColumnExists($tmpTable, 'enabled')) {
-            $column[] = 'status';
-        }
-
-        foreach ($columns as $column) {
-            if (in_array($column, $except)) {
-                continue;
-            }
-
-            if (preg_match('/-unit/', $column)) {
-                continue;
-            }
-
-            $columnPrefix = explode('-', $column);
-            $columnPrefix = reset($columnPrefix);
-
-            $this->_entities
-                ->getResource()
-                ->updateAllStageValues (
-                    $tmpTable,
-                    $connection->getTableName('catalog_product_entity'),
-                    4,
-                    $columnPrefix
-                );
-        }
-    }
-
-    /**
-     * Duplicate relations between products for all stages.
-     */
-    protected function updateAllStageRelations()
-    {
-        $connection = $this->_entities->getResource()->getConnection();
-
-        $tmpTable = $this->_entities->getTableName($this->getCode());
-        $entityTable = $connection->getTableName('catalog_product_entity');
-        $linkTable = $connection->getTableName('catalog_product_link');
-
-        $select = $this->stagingHelper->getBaseStageDuplicationSelect($connection, $entityTable, $tmpTable);
-        $select->joinInner(
-            ['u' => $linkTable],
-            'u.product_id = t._row_id',
-            []
-        );
-
-        $select->columns(['e.row_id', 'u.linked_product_id', 'u.link_type_id']);
-
-        $select->setPart('disable_staging_preview', true);
-
-        $insert = $connection->insertFromSelect(
-            $select,
-            $linkTable,
-            array('product_id', 'linked_product_id', 'link_type_id'),
-            1
-        );
-        $connection->query($insert);
-    }
-
-    /**
-     * Duplicate relations for configurable products for all stages.
-     */
-    protected function updateAllStageConfigurables()
-    {
-        $connection = $this->_entities->getResource()->getConnection();
-
-        $tmpTable = $this->_entities->getTableName($this->getCode());
-        $entityTable = $connection->getTableName('catalog_product_entity');
-
-        $attributeTable = $connection->getTableName('catalog_product_super_attribute');
-        $labelTable = $connection->getTableName('catalog_product_super_attribute_label');
-        $relationTable = $connection->getTableName('catalog_product_relation');
-        $linkTable = $connection->getTableName('catalog_product_super_link');
-
-        $baseSelect = $this->stagingHelper->getBaseStageDuplicationSelect($connection, $entityTable, $tmpTable);
-
-        /**
-         * Duplicating Data in catalog_product_super_attribute
-         */
-        $select = clone $baseSelect;
-        $select->joinInner(
-            ['u' => $attributeTable],
-            'u.product_id = t._row_id',
-            []
-        )->columns(['e.row_id', 'u.attribute_id', 'u.position']);
-
-        $insert = $connection->insertFromSelect(
-            $select,
-            $attributeTable,
-            array('product_id', 'attribute_id', 'position'),
-            1
-        );
-        $connection->query($insert);
-
-        /**
-         * Duplicating Data in catalog_product_super_attribute_label
-         */
-        $select = clone $baseSelect;
-        $select->joinInner(
-            ['u_new' => $attributeTable],
-            'u_new.product_id = e.row_id',
-            []
-        )->joinInner(
-            ['u_source' => $attributeTable],
-            'u_source.product_id = t._row_id',
-            []
-        )->joinInner(
-            ['l_source' => $labelTable],
-            'l_source.product_super_attribute_id = u_source.product_super_attribute_id',
-            []
-        )->columns(['u_new.product_super_attribute_id', 'l_source.store_id', 'l_source.use_default', 'l_source.value']);
-
-        $insert = $connection->insertFromSelect(
-            $select,
-            $labelTable,
-            array('product_super_attribute_id', 'store_id', 'use_default', 'value'),
-            1
-        );
-        $connection->query($insert);
-
-        /**
-         * Duplicating Data in catalog_product_relation
-         */
-        $select = clone $baseSelect;
-        $select->joinInner(
-            ['u' => $relationTable],
-            'u.parent_id = t._row_id',
-            []
-        )->columns(['e.row_id', 'u.child_id']);
-
-        $insert = $connection->insertFromSelect(
-            $select,
-            $relationTable,
-            array('parent_id', 'child_id'),
-            1
-        );
-        $connection->query($insert);
-        /**
-         * Duplicating Data in catalog_product_super_link
-         */
-        $select = clone $baseSelect;
-        $select->joinInner(
-            ['u' => $linkTable],
-            'u.parent_id = t._row_id',
-            []
-        )->columns(['e.row_id', 'u.product_id']);
-
-        $insert = $connection->insertFromSelect(
-            $select,
-            $linkTable,
-            array('parent_id', 'product_id'),
-            1
-        );
-        $connection->query($insert);
-    }
-
-    /**
-     * Duplicate medias between products for all stages.
-     */
-    protected function updateAllStageMedias()
-    {
-        $connection = $this->_entities->getResource()->getConnection();
-
-        $tmpTable = $this->_entities->getTableName($this->getCode());
-        $entityTable = $connection->getTableName('catalog_product_entity');
-        $mediaTable = $connection->getTableName('catalog_product_entity_media_gallery_value_to_entity');
-
-        $select = $this->stagingHelper->getBaseStageDuplicationSelect($connection, $entityTable, $tmpTable);
-        $select->joinInner(
-            ['u' => $mediaTable],
-            'u.row_id = t._row_id',
-            []
-        );
-
-        $select->columns(['u.value_id', 'e.row_id']);
-
-        $select->setPart('disable_staging_preview', true);
-
-        $insert = $connection->insertFromSelect(
-            $select,
-            $mediaTable,
-            array('value_id', 'row_id'),
-            1
-        );
-        $connection->query($insert);
     }
 
     /**
