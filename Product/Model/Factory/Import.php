@@ -250,7 +250,12 @@ class Import extends Factory
                 [self::COLUMN_STAGING_FROM => 'created_in', self::COLUMN_STAGING_TO => 'updated_in']
             );
 
-            $errorMsg = $this->stagingHelper->checkStageDates($connection, $tmpTable, 'sku');
+            $errorMsg = $this->stagingHelper->checkStageDates(
+                $connection,
+                $tmpTable,
+                $connection->getTableName('catalog_product_entity'),
+                'sku'
+            );
             if ($errorMsg) {
                 $this->setContinue(false);
                 $this->setStatus(false);

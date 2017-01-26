@@ -93,8 +93,22 @@ class Import extends AbstractHelper
      * @param $identifier
      * @return null|string
      */
-    public function checkStageDates(AdapterInterface $connection, $tmpTable, $identifier)
+    public function checkStageDates(AdapterInterface $connection, $tmpTable, $entityTable, $identifier)
     {
+        /**
+         * Check that only one stage of the product is being imported.
+         */
+        $select = $connection
+            ->select()
+            ->from($tmpTable, new Expr('count(*) as nb'))
+            ->group('sku')
+            ->having('nb > 1');
+        $nb = $connection->fetchOne($select);
+
+        if ($nb > 1) {
+            return "You can't import 2 stages of the same product at the same time!";
+        }
+
         /**
          * Check for incoherence in the created in and updated_in values.
          */
@@ -119,7 +133,7 @@ class Import extends AbstractHelper
 
         $invalidId = $connection->fetchOne($select);
         if ($invalidId) {
-            return "Error with '$invalidId' : Trying to update an on going or past stage stage !";
+            return "Error with '$invalidId' : Trying to update an on going or past stage !";
         }
 
         /**
@@ -143,9 +157,11 @@ class Import extends AbstractHelper
         if ($connection->tableColumnExists($tmpTable, 'groups')) {
             $select = $connection
                 ->select()
-                ->from($tmpTable, new Expr('count(DISTINCT created_in) as nb'))
+                ->from($tmpTable, ['groups'])
+                ->where('groups != ""')
                 ->group('groups')
-                ->having('nb > 1');
+                ->having('count(DISTINCT created_in) > 1');
+
             $nb = $connection->fetchOne($select);
 
             if ($nb > 1) {
@@ -153,7 +169,39 @@ class Import extends AbstractHelper
             }
         }
 
-        // TODO need to check if created & updated dates are also usable with actual database.
+        /*
+         * Check if created & updated dates are also usable with actual database. In order to do this we check for each
+         * product that we import if they alread
+         */
+        $select = $connection
+            ->select()
+            ->from(['t' => $tmpTable], $identifier)
+            ->joinInner(
+                ['e' => $entityTable],
+                'e.'. $identifier . ' = t. ' . $identifier,
+                []
+            )
+            ->joinInner(
+                ['u' => $connection->getTableName('staging_update')],
+                'u.id = e.created_in',
+                []
+            )
+            ->where('u.is_rollback IS NULL')
+            ->where(
+                '(u.id < t.created_in AND (u.rollback_id > t.created_in OR u.rollback_id IS NULL))
+                OR (u.id < t.updated_in AND (u.rollback_id > t.updated_in OR u.rollback_id IS NULL))
+                OR ((u.id BETWEEN t.created_in AND t.updated_in) AND u.id != t.created_in AND u.id != t.updated_in)
+                OR (u.rollback_id IS NOT NULL
+                    AND (u.rollback_id BETWEEN t.created_in AND t.updated_in) 
+                    AND u.rollback_id != t.created_in AND u.rollback_id != t.updated_in
+                )'
+            );
+        $select->setPart('disable_staging_preview', true);
+
+        $invalidId = $connection->fetchOne($select);
+        if ($invalidId) {
+            return "Error with '$invalidId' : 'from' and 'to' dates intersects with existing stages !";
+        }
 
         return null;
     }
@@ -529,7 +577,14 @@ class Import extends AbstractHelper
                         [
                             'id'         => 'created_in',
                             'start_time' => new Expr('from_unixtime(created_in)'),
-                            'name' => new Expr('"Pimgento"'),
+                            'name' =>
+                                new Expr(
+                                    'CONCAT(
+                                        "Pimgento : ", 
+                                        from_unixtime(created_in, GET_FORMAT(DATE,"ISO")), 
+                                        " to ", 
+                                        from_unixtime(updated_in, GET_FORMAT(DATE,"ISO")))'
+                                ),
                             'rollback_id'
                                 => new Expr('IF(updated_in = ' . VersionManager::MAX_VERSION . ', NULL, updated_in)'),
                             'is_rollback' => new Expr('NULL'),
