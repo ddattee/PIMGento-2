@@ -68,6 +68,10 @@ class AddPimgentoImportObserver extends AbstractAddImportObserver implements Obs
                 'method'  => 'addRequiredData',
             ),
             array(
+                'comment' => __('Match code with Magento ID'),
+                'method'  => 'checkStageDates',
+            ),
+            array(
                 'comment' => __('Create configurable product'),
                 'method'  => 'createConfigurable',
             ),

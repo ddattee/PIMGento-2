@@ -306,7 +306,12 @@ class Import extends Factory
             )
         );
 
-        $this->stagingHelper->createEntitiesAfter($connection, 'catalog_category_entity', $tmpTable);
+        $this->stagingHelper->createEntitiesAfter(
+            $connection,
+            'catalog_category_entity',
+            $tmpTable,
+            StagingConfigHelper::STAGING_MODE_LAST
+        );
 
         $values = array(
             'created_at' => new Expr('now()')

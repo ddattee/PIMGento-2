@@ -26,8 +26,8 @@ class Import extends Factory
     /**
      * Column names for the staging support.
      */
-    const COLUMN_STAGING_CREATED_IN = 'created_in';
-    const COLUMN_STAGING_UPDATE_IN = 'update_in';
+    const COLUMN_STAGING_FROM = 'from';
+    const COLUMN_STAGING_TO = 'to';
 
     /**
      * @var Entities
@@ -143,13 +143,8 @@ class Import extends Factory
 
             // If full mode is activated we need aditional columns.
             if ($this->_productHelper->isImportInFullStagingMode()) {
-                $requiredColumns[] = self::COLUMN_STAGING_CREATED_IN;
-                $requiredColumns[] = self::COLUMN_STAGING_UPDATE_IN;
-
-                // The full mode is not yet supported.so throw an error
-                $this->setContinue(false);
-                $this->setStatus(false);
-                $this->setMessage("Full staging mode isn't supported! Please use simple mode for now.");
+                $requiredColumns[] = self::COLUMN_STAGING_FROM;
+                $requiredColumns[] = self::COLUMN_STAGING_TO;
             }
 
             $this->_entities->createTmpTableFromFile($file, $this->getCode(), $requiredColumns);
@@ -238,6 +233,35 @@ class Import extends Factory
     }
 
     /**
+     * When the stage module is enable and we are on full staging mode the csv file may contain the start & end dates
+     * of versions. Transform those dates to timestamp & check that they are valid.
+     */
+    public function checkStageDates()
+    {
+        if ($this->_productHelper->isImportInFullStagingMode()) {
+
+            $connection = $this->_entities->getResource()->getConnection();
+            $tmpTable = $this->_entities->getTableName($this->getCode());
+
+            // First let's transform all the from & to dates to timestamps.
+            $this->stagingHelper->updateDates(
+                $connection,
+                $tmpTable,
+                [self::COLUMN_STAGING_FROM => 'created_in', self::COLUMN_STAGING_TO => 'updated_in']
+            );
+
+            $errorMsg = $this->stagingHelper->checkStageDates($connection, $tmpTable, 'sku');
+            if ($errorMsg) {
+                $this->setContinue(false);
+                $this->setStatus(false);
+                $this->setMessage($errorMsg);
+
+                return;
+            }
+        }
+    }
+
+    /**
      * Create Configurable products
      */
     public function createConfigurable()
@@ -257,12 +281,14 @@ class Import extends Factory
             );
         } else {
             $connection->addColumn($tmpTable, '_children', 'TEXT NULL');
+            $connection->addColumn($tmpTable, '_first_children', 'VARCHAR(255) NULL');
             $connection->addColumn($tmpTable, '_axis', 'VARCHAR(255) NULL');
 
             $data = array(
                 'sku' => 'e.groups',
                 'url_key' => 'e.groups',
                 '_children' => new Expr('GROUP_CONCAT(e.sku SEPARATOR ",")'),
+                '_first_children' => new Expr('COALESCE(e.sku)'),
                 '_type_id' => new Expr('"configurable"'),
                 '_options_container' => new Expr('"container1"'),
                 '_status' => 'e._status',
@@ -346,7 +372,7 @@ class Import extends Factory
     }
 
     /**
-     * Match code with entity
+     * Match code with entity, and if staging then also match with row id and create necessery duplications.
      */
     public function matchEntity()
     {
@@ -358,8 +384,18 @@ class Import extends Factory
              * table built for this purpose in magento.
              */
             $this->_entities->matchEntity($this->getCode(), 'sku', 'sequence_product', 'sequence_value');
+            $tmpTable = $this->_entities->getTableName($this->getCode());
 
-            // Once the entitie id's are matched we can match the row ids.
+            // We need to update the created/updated in values of the configurables.
+            $this->stagingProductHelper->updateConfigurableStages(
+                $this->_entities,
+                $tmpTable,
+                'catalog_product_entity',
+                $this->getCode(),
+                $this->_productHelper->getImportStagingMode()
+            );
+
+            // Once the entiy id's are matched we can match the row ids.
             $this->stagingHelper->matchEntityRows(
                 $this->_entities,
                 'catalog_product_entity',
@@ -420,6 +456,7 @@ class Import extends Factory
             '_attribute_set_id',
             '_visibility',
             '_children',
+            '_first_children',
             '_axis',
             'sku',
             'categories',
@@ -513,7 +550,12 @@ class Import extends Factory
             )
         );
 
-        $this->stagingHelper->createEntitiesAfter($connection, 'catalog_product_entity', $tmpTable);
+        $this->stagingHelper->createEntitiesAfter(
+            $connection,
+            'catalog_product_entity',
+            $tmpTable,
+            $this->_productHelper->getImportStagingMode()
+        );
 
         $values = array(
             'created_at' => new Expr('now()')
@@ -550,6 +592,7 @@ class Import extends Factory
             '_attribute_set_id',
             '_visibility',
             '_children',
+            '_first_children',
             '_axis',
             'sku',
             'categories',
@@ -898,12 +941,12 @@ class Import extends Factory
      */
     public function updateAllStages()
     {
+
+        $tmpTable = $this->_entities->getTableName($this->getCode());
         if ($this->_productHelper->getImportStagingMode() == StagingConfigHelper::STAGING_MODE_ALL) {
-
-            $tmpTable = $this->_entities->getTableName($this->getCode());
-
             /**
-             * We need to update all stages for all attributes that have been imported.
+             * In this mode pimgento don't really cares about the stage it updates because it simply updates all
+             * stages
              */
             $this->stagingProductHelper->updateAllStageValues($this->_entities, $tmpTable);
 
@@ -912,6 +955,30 @@ class Import extends Factory
             $this->stagingProductHelper->updateAllStageConfigurables($this->_entities, $tmpTable);
 
             $this->stagingProductHelper->updateAllStageMedias($this->_entities, $tmpTable);
+
+        } elseif ($this->_productHelper->getImportStagingMode() == StagingConfigHelper::STAGING_MODE_FULL) {
+
+            /**
+             * In this mode pimgento will need to duplicate some information. It needs to do this because a new version
+             * has been created and the old version was split in 2 parts that needs to have the same data.
+             */
+            $duplicateTmpTable = $this->_entities
+                ->getResource()
+                ->getConnection()
+                ->getTableName('tmp_pimgento_entity_stage_duplicate');
+            $condition = 't.created_in = e.created_in';
+
+            $this->stagingProductHelper
+                ->updateAllStageValues($this->_entities, $duplicateTmpTable, $condition, $tmpTable);
+
+            $this->stagingProductHelper
+                ->updateAllStageRelations($this->_entities, $duplicateTmpTable, $condition);
+
+            $this->stagingProductHelper
+                ->updateAllStageConfigurables($this->_entities, $duplicateTmpTable, $condition);
+
+            $this->stagingProductHelper
+                ->updateAllStageMedias($this->_entities, $tmpTable, $condition);
         }
     }
 
@@ -921,6 +988,8 @@ class Import extends Factory
     public function dropTable()
     {
         $this->_entities->dropTable($this->getCode());
+
+        $this->stagingHelper->dropTemporaryStageTable($this->_entities->getResource()->getConnection());
     }
 
     /**

@@ -422,7 +422,7 @@ class Entities extends AbstractDb
      * @param $entityTypeId
      * @param $attributeCode
      */
-    public function updateAllStageValues($tableName, $entityTable, $entityTypeId, $attributeCode)
+    public function updateAllStageValues($tableName, $entityTable, $entityTypeId, $attributeCode, $joinCondition = 't._row_id != e.row_id')
     {
         $connection = $this->getConnection();
 
@@ -437,7 +437,7 @@ class Entities extends AbstractDb
                         []
                     )->joinInner(
                         ['t' => $tableName],
-                        't._entity_id = e.entity_id AND t._row_id != e.row_id',
+                        "t._entity_id = e.entity_id AND $joinCondition",
                         []
                     )->joinInner(
                         ['u' => $attributeTable],
