@@ -415,6 +415,53 @@ class Entities extends AbstractDb
     }
 
     /**
+     * Update the values for an entity in all it's stages.
+     *
+     * @param $tableName
+     * @param $entityTable
+     * @param $entityTypeId
+     * @param $attributeCode
+     */
+    public function updateAllStageValues($tableName, $entityTable, $entityTypeId, $attributeCode, $joinCondition = 't._row_id != e.row_id')
+    {
+        $connection = $this->getConnection();
+
+        if (($attribute = $this->getAttribute($attributeCode, $entityTypeId))) {
+            if ($attribute['backend_type'] !== 'static') {
+                $backendType = $attribute['backend_type'];
+                $attributeTable = $connection->getTableName($entityTable . '_' . $backendType);
+
+                $select = $connection->select()
+                    ->from(
+                        ['e' =>$entityTable],
+                        []
+                    )->joinInner(
+                        ['t' => $tableName],
+                        "t._entity_id = e.entity_id AND $joinCondition",
+                        []
+                    )->joinInner(
+                        ['u' => $attributeTable],
+                        'u.row_id = t._row_id AND attribute_id = ' . $attribute['attribute_id'],
+                        []
+                    );
+
+                $select->columns(['u.attribute_id', 'u.store_id', 'e.row_id', 'u.value']);
+
+                $select->setPart('disable_staging_preview', true);
+
+                $insert = $connection->insertFromSelect(
+                    $select,
+                    $attributeTable,
+                    array('attribute_id', 'store_id', 'row_id', 'value'),
+                    1
+                );
+
+                $connection->query($insert);
+            }
+        }
+    }
+
+    /**
      * Copy column to an other
      *
      * @param string $tableName
