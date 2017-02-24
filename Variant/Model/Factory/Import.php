@@ -185,18 +185,14 @@ class Import extends Factory
              * Write 500 values at a time.
              */
             if (count($values) > 500) {
-                $connection->insertOnDuplicate(
-                    $variantTable, $values, $keys
-                );
+                $connection->insertOnDuplicate($variantTable, $values, $keys);
                 $values = [];
                 $i = 0;
             }
         }
 
         if (count($values) > 0) {
-            $connection->insertOnDuplicate(
-                $variantTable, $values, $keys
-            );
+            $connection->insertOnDuplicate($variantTable, $values, $keys);
         }
     }
 
