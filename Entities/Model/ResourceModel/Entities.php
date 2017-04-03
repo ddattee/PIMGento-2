@@ -384,7 +384,7 @@ class Entities extends AbstractDb
                             array(
                                 'attribute_id'   => new Expr($attribute['attribute_id']),
                                 'store_id'       => new Expr($storeId),
-                                $identifier      => '_entity_id',
+                                $identifier      => $identifier,
                                 'value'          => $value
                             )
                         );
