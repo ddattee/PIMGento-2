@@ -2,7 +2,6 @@
 
 namespace Pimgento\Product\Model\Factory;
 
-use Magento\Staging\Model\VersionManager;
 use \Pimgento\Import\Model\Factory;
 use \Pimgento\Entities\Model\Entities;
 use \Pimgento\Import\Helper\Config as helperConfig;
@@ -12,6 +11,9 @@ use \Pimgento\Product\Helper\Staging as StagingProductHelper;
 use \Pimgento\Staging\Helper\Import as StagingHelper;
 use \Pimgento\Product\Helper\Config as productHelper;
 use \Pimgento\Product\Helper\Media as mediaHelper;
+use \Pimgento\Product\Model\Factory\Import\Related;
+use \Pimgento\Product\Model\Factory\Import\Media;
+use \Magento\Catalog\Model\Product;
 use \Magento\Catalog\Model\Product\Link as Link;
 use \Magento\Framework\Event\ManagerInterface;
 use \Magento\Framework\App\Cache\TypeListInterface;
@@ -19,6 +21,7 @@ use \Magento\Eav\Model\Entity\Attribute\SetFactory;
 use \Magento\Framework\Module\Manager as moduleManager;
 use \Magento\Framework\App\Config\ScopeConfigInterface as scopeConfig;
 use \Magento\Framework\DB\Adapter\AdapterInterface;
+use \Magento\Staging\Model\VersionManager;
 use \Zend_Db_Expr as Expr;
 
 class Import extends Factory
@@ -81,6 +84,21 @@ class Import extends Factory
     protected $stagingProductHelper;
 
     /**
+     * @var Media $_media
+     */
+    protected $_media;
+
+    /**
+     * @var Related $_related
+     */
+    protected $_related;
+
+    /**
+     * @var Product $_product
+     */
+    protected $_product;
+
+    /**
      * PHP Constructor
      *
      * @param \Pimgento\Import\Helper\Config                     $helperConfig
@@ -93,6 +111,9 @@ class Import extends Factory
      * @param \Pimgento\Product\Helper\Config                    $productHelper
      * @param \Pimgento\Product\Helper\Media                     $mediaHelper
      * @param urlRewriteHelper                                   $urlRewriteHelper
+     * @param Related                                            $related
+     * @param Media                                              $media
+     * @param Product                                            $product
      * @param StagingConfigHelper                                $stagingConfigHelper
      * @param StagingHelper                                      $stagingHelper
      * @param StagingProductHelper                               $stagingProductHelper
@@ -112,6 +133,9 @@ class Import extends Factory
         StagingConfigHelper $stagingConfigHelper,
         StagingHelper $stagingHelper,
         StagingProductHelper $stagingProductHelper,
+        Related $related,
+        Media $media,
+        Product $product,
         array $data = []
     ) {
         parent::__construct($helperConfig, $eventManager, $moduleManager, $scopeConfig, $data);
@@ -125,6 +149,9 @@ class Import extends Factory
         $this->stagingConfigHelper = $stagingConfigHelper;
         $this->stagingHelper = $stagingHelper;
         $this->stagingProductHelper = $stagingProductHelper;
+        $this->_related = $related;
+        $this->_media = $media;
+        $this->_product = $product;
     }
 
     /**
@@ -438,6 +465,25 @@ class Import extends Factory
             $connection->query(
                 $connection->updateFromSelect($families, array('p' => $tmpTable))
             );
+
+            $noFamily = $connection->fetchOne(
+                $connection->select()
+                    ->from($tmpTable, array('COUNT(*)'))
+                    ->where('_attribute_set_id = ?', 0)
+            );
+
+            if ($noFamily) {
+                $this->setStatus(false);
+                $this->setMessage(
+                    __('Warning: %1 product(s) without family. Please try to import families.', $noFamily)
+                );
+            }
+
+            $connection->update(
+                $tmpTable,
+                array('_attribute_set_id' => $this->_product->getDefaultAttributeSetId()),
+                array('_attribute_set_id = ?' => 0)
+            );
         }
     }
 
@@ -654,11 +700,9 @@ class Import extends Factory
 
         }
 
-        $identifierField =  $this->stagingConfigHelper->isCatalogStagingModulesEnabled() ? 'row_id' : 'entity_id';
         foreach($values as $storeId => $data) {
-
             $this->_entities->setValues(
-                $this->getCode(), $connection->getTableName('catalog_product_entity'), $data, 4, $storeId, 1, $identifierField
+                $this->getCode(), $connection->getTableName('catalog_product_entity'), $data, 4, $storeId, 1
             );
         }
     }
@@ -732,7 +776,6 @@ class Import extends Factory
                         'attribute_id' => $id,
                         'position' => $position++,
                     );
-
                     $connection->insertOnDuplicate(
                         $connection->getTableName('catalog_product_super_attribute'), $values, array()
                     );
@@ -1006,10 +1049,7 @@ class Import extends Factory
              * In this mode pimgento will need to duplicate some information. It needs to do this because a new version
              * has been created and the old version was split in 2 parts that needs to have the same data.
              */
-            $duplicateTmpTable = $this->_entities
-                ->getResource()
-                ->getConnection()
-                ->getTableName('tmp_pimgento_entity_stage_duplicate');
+            $duplicateTmpTable = $this->_entities->getTableName('entity_stage_duplicate');
             $condition = 't.created_in = e.created_in';
 
             $this->stagingProductHelper
@@ -1056,12 +1096,20 @@ class Import extends Factory
     }
 
     /**
+     * Clean the media folder
+     */
+    public function cleanMediaFolder()
+    {
+        $this->_media->cleanMediaFolder();
+    }
+
+    /**
      * Set related, up-sell and cross-sell
-     *
-     * @return void
      */
     public function setRelated()
     {
+        $this->_related->setCode($this->getCode());
+
         $connection = $this->_entities->getResource()->getConnection();
         $tmpTable = $this->_entities->getTableName($this->getCode());
 
@@ -1119,684 +1167,41 @@ class Import extends Factory
             );
         }
 
-        $this->relatedCreateTmpTables();
+        $this->_related->relatedCreateTmpTables();
         foreach ($related as $type) {
-            $this->relatedImportColumn($type);
+            $this->_related->relatedImportColumn($type);
         }
-        $this->relatedDropTmpTables();
-    }
-
-    /**
-     * Create the temporary tables needed bby related product import
-     *
-     * @return void
-     */
-    protected function relatedCreateTmpTables()
-    {
-        $connection = $this->_entities->getResource()->getConnection();
-        $tableNumber = $connection->getTableName('tmp_pimgento_numbers');
-        $tableRelated = $connection->getTableName('tmp_pimgento_related');
-
-        $connection->dropTable($tableNumber);
-        $connection->dropTable($tableRelated);
-
-        $table = $connection->newTable($tableNumber);
-        $table->addColumn('n', \Magento\Framework\DB\Ddl\Table::TYPE_INTEGER, 11, []);
-        $connection->createTable($table);
-
-        $table = $connection->newTable($tableRelated);
-        $table->addColumn('parent_sku', \Magento\Framework\DB\Ddl\Table::TYPE_TEXT, 255, []);
-        $table->addColumn('parent_id', \Magento\Framework\DB\Ddl\Table::TYPE_INTEGER, 11, []);
-        $table->addColumn('child_sku', \Magento\Framework\DB\Ddl\Table::TYPE_TEXT, 255, []);
-        $table->addColumn('child_id', \Magento\Framework\DB\Ddl\Table::TYPE_INTEGER, 11, []);
-        $connection->createTable($table);
-
-        $values = [];
-        for ($k=0; $k<10000; $k++) {
-            $values[] = ['n' => $k+1];
-        }
-        $connection->insertMultiple($tableNumber, $values);
-    }
-
-    /**
-     * Drop the temporary tables needed bby related product import
-     *
-     * @return void
-     */
-    protected function relatedDropTmpTables()
-    {
-        $connection = $this->_entities->getResource()->getConnection();
-        $tableNumber = $connection->getTableName('tmp_pimgento_numbers');
-        $tableRelated = $connection->getTableName('tmp_pimgento_related');
-
-        $connection->dropTable($tableNumber);
-        $connection->dropTable($tableRelated);
-    }
-
-    /**
-     * Manage one related column
-     *
-     * @param array $type
-     *
-     * @return void
-     */
-    protected function relatedImportColumn($type)
-    {
-        $connection = $this->_entities->getResource()->getConnection();
-
-        $tmpTable     = $this->_entities->getTableName($this->getCode());
-        $tableNumber  = $connection->getTableName('tmp_pimgento_numbers');
-        $tableRelated = $connection->getTableName('tmp_pimgento_related');
-        $tableProduct = $connection->getTableName('catalog_product_entity');
-
-        $column = $type['column'];
-
-        $ids = $this->getMaxAndMinIds($column);
-        if ($ids['max'] < 1) {
-            return false;
-        }
-
-        // we must do this step by step because of a mysql usage limitation
-        $step = 1000;
-        $min = $ids['min'] + $step;
-        $max = $ids['max'] + $step;
-        for ($limit = $min; $limit <= $max; $limit += $step) {
-            // transform one row for multiple links => one row for one link
-            $select = $connection->select()
-                ->from(
-                    ['t' => $tmpTable],
-                    ['parent_sku' => 't.sku']
-                )->joinInner(
-                    ['n' => $tableNumber],
-                    "
-                        `t`.`$column` <> ''
-                        AND `t`.`_entity_id` <= $limit
-                        AND (char_length(t.`$column`) - char_length(replace(t.`$column`, ',', ''))) >= n.n-1 
-                    ",
-                    ['child_sku' => new Expr("substring_index(substring_index(t.`$column`, ',', n.n), ',', -1)")]
-                );
-
-            $query = $connection->insertFromSelect(
-                $select,
-                $tableRelated,
-                ['parent_sku', 'child_sku'],
-                AdapterInterface::INSERT_ON_DUPLICATE
-            );
-
-            $connection->query($query);
-            $connection->update(
-                $tmpTable,
-                [$column => ''],
-                ["_entity_id <= $limit" ]
-            );
-        }
-
-        // get the product ids for parents
-        // @todo use Zend methods for mass update
-        // @TODO check if we can't do this in the insertFromSelect.
-        if ($this->stagingConfigHelper->isCatalogStagingModulesEnabled()) {
-            $query = "
-                UPDATE $tableRelated, $tmpTable
-                SET $tableRelated.parent_id = $tmpTable._row_id
-                WHERE $tableRelated.parent_sku = $tmpTable.sku
-            ";
-        } else {
-            $query = "
-                UPDATE $tableRelated, $tableProduct
-                SET $tableRelated.parent_id = $tableProduct.entity_id
-                WHERE $tableRelated.parent_sku = $tableProduct.sku
-            ";
-        }
-        $connection->query($query);
-
-        // get the product ids for links
-        // @todo use Zend methods for mass update
-        $query = "
-            UPDATE $tableRelated, $tableProduct
-            SET $tableRelated.child_id = $tableProduct.entity_id
-            WHERE $tableRelated.child_sku = $tableProduct.sku
-        ";
-        $connection->query($query);
-
-        // delete bad links
-        $connection->delete($tableRelated, 'child_id IS NULL or parent_id IS NULL');
-
-        // save the links
-        $select = $connection->select()
-            ->from(
-                ['l' => $tableRelated],
-                [
-                    'product_id'        => 'l.parent_id',
-                    'linked_product_id' => 'l.child_id',
-                    'link_type_id'      => new Expr($type['type_id'])
-                ]
-            );
-        $query = $connection->insertFromSelect(
-            $select,
-            $connection->getTableName('catalog_product_link'),
-            ['product_id', 'linked_product_id', 'link_type_id'],
-            AdapterInterface::INSERT_ON_DUPLICATE
-        );
-        $connection->query($query);
-
-        $connection->delete($tableRelated);
-    }
-
-    /**
-     * Get the min and the max of the product entity_id where a column is not empty
-     *
-     * @param string $column
-     *
-     * @return int[]
-     */
-    protected function getMaxAndMinIds($column)
-    {
-        $connection = $this->_entities->getResource()->getConnection();
-        $tmpTable     = $this->_entities->getTableName($this->getCode());
-
-        $select = $connection->select()
-            ->from(
-                ['t' => $tmpTable],
-                [
-                    'min_id' => new Expr('MIN(_entity_id)'),
-                    'max_id' => new Expr('MAX(_entity_id)'),
-                ]
-            )
-            ->where("`$column` <> ''");
-
-        $ids = $connection->fetchAll($select);
-        $ids = [
-            'min' => (int) $ids[0]['min_id'],
-            'max' => (int) $ids[0]['max_id'],
-        ];
-
-        return  $ids;
+        $this->_related->relatedDropTmpTables();
     }
 
     /**
      * Import the medias
-     *
-     * @return boolean
      */
     public function importMedia()
     {
+        $this->_media->setCode($this->getCode());
+
         $this->_mediaHelper->initHelper(dirname($this->getFileFullPath()));
 
         $connection = $this->_entities->getResource()->getConnection();
         $tmpTable   = $this->_entities->getTableName($this->getCode());
 
-        $tableColumns     = array_keys($connection->describeTable($tmpTable));
+        $tableColumns = array_keys($connection->describeTable($tmpTable));
         $fields = $this->_mediaHelper->getFields();
 
-        $this->mediaCreateTmpTables();
+        $this->_media->mediaCreateTmpTables();
         foreach ($fields as $field) {
             foreach ($field['columns'] as $position => $column) {
                 if (in_array($column, $tableColumns)) {
-                    $this->mediaPrepareValues($column, $field['attribute_id'], $position);
+                    $this->_media->mediaPrepareValues($column, $field['attribute_id'], $position);
                 }
             }
         }
 
-        $this->mediaCleanValues();
-        $this->mediaRemoveUnknownFiles();
-        $this->mediaCopyFiles();
-        $this->mediaUpdateDataBase();
-        $this->mediaDropTmpTables();
-    }
-
-    /**
-     * Clean the media folder
-     *
-     * @return boolean
-     */
-    public function cleanMediaFolder()
-    {
-        if ($this->_mediaHelper->isCleanFiles()) {
-            $this->_mediaHelper->cleanFiles();
-        }
-
-        return true;
-    }
-
-    /**
-     * Create the temporary tables needed bby related product import
-     *
-     * @return void
-     */
-    protected function mediaCreateTmpTables()
-    {
-        $connection = $this->_entities->getResource()->getConnection();
-        $tableMedia = $connection->getTableName('tmp_pimgento_media');
-
-        $connection->dropTable($tableMedia);
-
-        $table = $connection->newTable($tableMedia);
-        $table->addColumn('sku', \Magento\Framework\DB\Ddl\Table::TYPE_TEXT, 255, []);
-        $table->addColumn('entity_id', \Magento\Framework\DB\Ddl\Table::TYPE_INTEGER, 10, ['unsigned' => true]);
-        $table->addColumn('attribute_id', \Magento\Framework\DB\Ddl\Table::TYPE_SMALLINT, 5, ['unsigned' => true]);
-        $table->addColumn('store_id', \Magento\Framework\DB\Ddl\Table::TYPE_SMALLINT, 5, ['unsigned' => true]);
-        $table->addColumn('value_id', \Magento\Framework\DB\Ddl\Table::TYPE_INTEGER, 10, ['unsigned' => true]);
-        $table->addColumn('record_id', \Magento\Framework\DB\Ddl\Table::TYPE_INTEGER, 10, ['unsigned' => true]);
-        $table->addColumn('media_original', \Magento\Framework\DB\Ddl\Table::TYPE_TEXT, 255, []);
-        $table->addColumn('media_cleaned', \Magento\Framework\DB\Ddl\Table::TYPE_TEXT, 255, []);
-        $table->addColumn('media_value', \Magento\Framework\DB\Ddl\Table::TYPE_TEXT, 255, []);
-        $table->addColumn('position', \Magento\Framework\DB\Ddl\Table::TYPE_INTEGER, 10, ['unsigned' => true]);
-
-        if ($this->stagingConfigHelper->isCatalogStagingModulesEnabled()) {
-            $table->addColumn('row_id', \Magento\Framework\DB\Ddl\Table::TYPE_INTEGER, 10, ['unsigned' => true]);
-        }
-
-        $table->addIndex(
-            $tableMedia.'_entity_id',
-            ['entity_id'],
-            ['type' => AdapterInterface::INDEX_TYPE_INDEX]
-        );
-        $table->addIndex(
-            $tableMedia.'_attribute_id',
-            ['attribute_id'],
-            ['type' => AdapterInterface::INDEX_TYPE_INDEX]
-        );
-        $table->addIndex(
-            $tableMedia.'_store_id',
-            ['store_id'],
-            ['type' => AdapterInterface::INDEX_TYPE_INDEX]
-        );
-        $table->addIndex(
-            $tableMedia.'_value_id',
-            ['value_id'],
-            ['type' => AdapterInterface::INDEX_TYPE_INDEX]
-        );
-        $table->addIndex(
-            $tableMedia.'_record_id',
-            ['record_id'],
-            ['type' => AdapterInterface::INDEX_TYPE_INDEX]
-        );
-        $table->addIndex(
-            $tableMedia.'_media_value',
-            ['media_value'],
-            ['type' => AdapterInterface::INDEX_TYPE_INDEX]
-        );
-        $connection->createTable($table);
-    }
-
-    /**
-     * Drop the temporary tables needed by media product import
-     *
-     * @return void
-     */
-    protected function mediaDropTmpTables()
-    {
-        $connection = $this->_entities->getResource()->getConnection();
-        $tableMedia = $connection->getTableName('tmp_pimgento_media');
-
-        $connection->dropTable($tableMedia);
-    }
-
-
-    /**
-     * Import one column of media import - Database values
-     *
-     * @param string $column
-     * @param int    $attributeId
-     * @param int    $position
-     *
-     * @return boolean
-     */
-    protected function mediaPrepareValues($column, $attributeId, $position)
-    {
-        $connection = $this->_entities->getResource()->getConnection();
-        $tmpTable   = $this->_entities->getTableName($this->getCode());
-        $tableMedia = $connection->getTableName('tmp_pimgento_media');
-
-        if (is_null($attributeId)) {
-            $attributeId = 'NULL';
-        }
-
-        $cols = [
-            'sku'            => 't.sku',
-            'entity_id'      => 't._entity_id',
-            'attribute_id'   => new Expr($attributeId),
-            'store_id'       => new Expr('0'),
-            'media_original' => "t.$column",
-            'position'       => new Expr($position)
-        ];
-
-        if ($this->stagingConfigHelper->isCatalogStagingModulesEnabled()) {
-            $cols['row_id'] = 't._row_id';
-        }
-
-        $select = $connection->select()
-            ->from(
-                ['t' => $tmpTable],
-                $cols
-            )->where("`t`.`$column` <> ''");
-
-        $query = $connection->insertFromSelect(
-            $select,
-            $tableMedia,
-            array_keys($cols),
-            AdapterInterface::INSERT_ON_DUPLICATE
-        );
-
-        $connection->query($query);
-
-        return true;
-    }
-
-    /**
-     * Clean the values to import for medias :
-     * - Remove files/ and /files/ from the beginning of the value
-     * - remove bad chars
-     * - change folder separator into -
-     *
-     * @return void
-     */
-    protected function mediaCleanValues()
-    {
-        $connection = $this->_entities->getResource()->getConnection();
-        $tableMedia = $connection->getTableName('tmp_pimgento_media');
-
-        $expr = "REPLACE(REPLACE(REPLACE(LOWER(`media_original`), '/', '-'), '-files-', ''), 'files-', '')";
-        $connection->update($tableMedia, ['media_cleaned' => new Expr($expr)]);
-
-        $expr = "TRIM(CONCAT_WS('-', LOWER(`sku`), `media_cleaned`))";
-        $connection->update($tableMedia, ['media_cleaned' => new Expr($expr)]);
-
-        $expr = "LEFT(REPLACE(`media_cleaned`, '-', ''), 4)";
-        $connection->update($tableMedia, ['media_value' => new Expr($expr)]);
-
-        $expr = "CONCAT_WS('/', '', SUBSTR(`media_value`, 1, 1), SUBSTR(`media_value`, 2, 1), `media_cleaned`)";
-        $connection->update($tableMedia, ['media_value' => new Expr($expr)]);
-
-        $connection->addColumn(
-            $tableMedia,
-            'id',
-            [
-                'type'     => \Magento\Framework\DB\Ddl\Table::TYPE_INTEGER,
-                'length'   => 10,
-                'identity' => true,
-                'unsigned' => true,
-                'nullable' => false,
-                'primary'  => true,
-                'comment'  => 'primary key',
-            ]
-        );
-    }
-
-    /**
-     * Get the max id to treat for media import
-     *
-     * @return int
-     */
-    protected function mediaGetMaxId($tableName, $columnId)
-    {
-        $connection = $this->_entities->getResource()->getConnection();
-
-        $select = $connection->select()
-            ->from(
-                ['t' => $tableName],
-                ['max_id'         => new Expr('MAX('.$columnId.')')]
-            );
-
-        $values = $connection->fetchAll($select);
-
-        return (int) $values[0]['max_id'];
-
-    }
-
-    /**
-     * Remove the lines that corresponds to unknown files on disc
-     *
-     * @return void
-     */
-    protected function mediaRemoveUnknownFiles()
-    {
-        $connection = $this->_entities->getResource()->getConnection();
-        $tableMedia = $connection->getTableName('tmp_pimgento_media');
-
-        $maxId = $this->mediaGetMaxId($tableMedia, 'id');
-        if ($maxId<1) {
-            return;
-        }
-
-        $step = 5000;
-        for ($k=1; $k<=$maxId; $k+= $step) {
-            $min = $k;
-            $max = $k + $step;
-            $select = $connection->select()
-            ->from(
-                ['t' => $tableMedia],
-                [
-                    'id'    => 'id',
-                    'file' => 'media_original',
-                ]
-            )->where("id >= $min AND id < $max");
-            $medias = $connection->fetchAll($select);
-
-            $idsToDelete = [];
-            foreach ($medias as $media) {
-                $file = $this->_mediaHelper->getImportFolder().$media['file'];
-                if (!is_file($file)) {
-                    $idsToDelete[] = (int) $media['id'];
-                }
-            }
-
-            if (count($idsToDelete)) {
-                $connection->delete($tableMedia, $connection->quoteInto('id IN (?)', $idsToDelete));
-            }
-        }
-    }
-
-    /**
-     * Copy the medias to the media folder of magento
-     *
-     * @return void
-     */
-    protected function mediaCopyFiles()
-    {
-        $connection = $this->_entities->getResource()->getConnection();
-        $tableMedia = $connection->getTableName('tmp_pimgento_media');
-
-        $maxId = $this->mediaGetMaxId($tableMedia, 'id');
-        if ($maxId<1) {
-            return;
-        }
-
-        $step = 5000;
-        for ($k=1; $k<=$maxId; $k+= $step) {
-            $min = $k;
-            $max = $k + $step;
-            $select = $connection->select()
-            ->from(
-                ['t' => $tableMedia],
-                [
-                    'from' => 'media_original',
-                    'to'   => 'media_value',
-                ]
-            )->where(
-                "id >= $min AND id < $max"
-            );
-            $medias = $connection->fetchAll($select);
-            foreach ($medias as $media) {
-                $from = $this->_mediaHelper->getImportFolder().$media['from'];
-                $to = $this->_mediaHelper->getMediaAbsolutePath().$media['to'];
-
-                // if it does not exist, we pass
-                if (!is_file($from)) {
-                    continue;
-                }
-
-                // create the final folder
-                if (!is_dir(dirname($to))) {
-                    mkdir(dirname($to), 0775, true);
-                }
-
-                // remove the file if it exist
-                if (is_file($to)) {
-                    unlink($to);
-                }
-
-                copy($from, $to);
-            }
-        }
-    }
-
-    /**
-     * Update the media database
-     *
-     * @return void
-     */
-    protected function mediaUpdateDataBase()
-    {
-        $connection = $this->_entities->getResource()->getConnection();
-        $tableMedia = $connection->getTableName('tmp_pimgento_media');
-        $step = 5000;
-
-        $cols = [
-            'attribute_id' => 'attribute_id',
-            'store_id'     => 'store_id',
-            'value'        => 'media_value',
-        ];
-
-        if ($this->stagingConfigHelper->isCatalogStagingModulesEnabled()) {
-            $cols['row_id'] = 'row_id';
-            $primary_id = 'row_id';
-        } else {
-            $cols['entity_id'] = 'entity_id';
-            $primary_id = 'entity_id';
-        }
-
-        // add the media in the varchar product table
-        $select = $connection->select()
-            ->from(
-                ['t' => $tableMedia],
-                $cols
-            )
-            ->where('t.attribute_id is not null');
-        $query = $connection->insertFromSelect(
-            $select,
-            $connection->getTableName('catalog_product_entity_varchar'),
-            array_keys($cols),
-            AdapterInterface::INSERT_ON_DUPLICATE
-        );
-        $connection->query($query);
-
-        // working on "media gallery"
-        $tableGallery = $connection->getTableName('catalog_product_entity_media_gallery');
-
-        // get the value id from gallery (for already existing medias)
-        $maxId = $this->mediaGetMaxId($tableGallery, 'value_id');
-        for ($k=1; $k<=$maxId; $k+= $step) {
-            $min = $k;
-            $max = $k + $step;
-            // @todo use Zend methods for mass update
-            $query = "
-                UPDATE $tableMedia, $tableGallery
-                SET $tableMedia.value_id = $tableGallery.value_id
-                WHERE $tableGallery.value_id >= $min AND $tableGallery.value_id < $max
-                AND BINARY $tableGallery.value = $tableMedia.media_value
-            ";
-            $connection->query($query);
-        }
-
-        // add the new medias to the gallery
-        $select = $connection->select()
-            ->from(
-                ['t' => $tableMedia],
-                [
-                    'attribute_id' => new Expr($this->_mediaHelper->getMediaGalleryAttributeId()),
-                    'value'        => 'media_value',
-                    'media_type'   => new Expr("'image'"),
-                    'disabled'     => new Expr('0'),
-                ]
-            )->where(
-                't.value_id IS NULL'
-            )->group('t.media_value');
-
-        $query = $connection->insertFromSelect(
-            $select,
-            $tableGallery,
-            ['attribute_id', 'value', 'media_type', 'disabled'],
-            AdapterInterface::INSERT_ON_DUPLICATE
-        );
-        $connection->query($query);
-
-        // get the value id from gallery (for new medias)
-        $maxId = $this->mediaGetMaxId($tableGallery, 'value_id');
-        for ($k=1; $k<=$maxId; $k+= $step) {
-            $min = $k;
-            $max = $k + $step;
-            // @todo use Zend methods for mass update
-            $query = "
-                UPDATE $tableMedia, $tableGallery
-                SET $tableMedia.value_id = $tableGallery.value_id
-                WHERE $tableGallery.value_id >= $min AND $tableGallery.value_id < $max
-                AND BINARY $tableGallery.value = $tableMedia.media_value
-                AND $tableMedia.value_id IS NULL
-            ";
-            $connection->query($query);
-        }
-
-        // working on "media gallery value"
-        $tableGallery = $connection->getTableName('catalog_product_entity_media_gallery_value');
-
-        // get the record id from gallery value (for new medias)
-        $maxId = $this->mediaGetMaxId($tableGallery, 'record_id');
-        for ($k=1; $k<=$maxId; $k+= $step) {
-            $min = $k;
-            $max = $k+$step;
-            // @todo use Zend methods for mass update
-            $query = "
-                UPDATE $tableMedia, $tableGallery
-                SET $tableMedia.record_id = $tableGallery.record_id
-                WHERE $tableGallery.record_id >= $min AND $tableGallery.record_id < $max
-                AND $tableGallery.$primary_id = $tableMedia.$primary_id
-                AND $tableGallery.value_id = $tableMedia.value_id
-                AND $tableGallery.store_id = $tableMedia.store_id
-            ";
-            $connection->query($query);
-        }
-
-        // add the new medias to the gallery value
-        $select = $connection->select()
-            ->from(
-                ['t' => $tableMedia],
-                [
-                    'value_id'  => 'value_id',
-                    'store_id'  => new Expr('0'),
-                    $primary_id => $primary_id,
-                    'label'     => new Expr("''"),
-                    'position'  => 'position',
-                ]
-            )->where(
-                't.record_id IS NULL'
-            );
-        $query = $connection->insertFromSelect(
-            $select,
-            $tableGallery,
-            ['value_id', 'store_id', $primary_id, 'label', 'position'],
-            AdapterInterface::INSERT_ON_DUPLICATE
-        );
-        $connection->query($query);
-
-        // working on "media gallery value to entity"
-        $tableGallery = $connection->getTableName('catalog_product_entity_media_gallery_value_to_entity');
-
-        // add the new medias to the gallery linked to entity
-        $select = $connection->select()
-            ->from(
-                ['t' => $tableMedia],
-                [
-                    'value_id'  => 'value_id',
-                    $primary_id => $primary_id,
-                ]
-            );
-        $query = $connection->insertFromSelect(
-            $select,
-            $tableGallery,
-            ['value_id', $primary_id],
-            AdapterInterface::INSERT_IGNORE
-        );
-        $connection->query($query);
+        $this->_media->mediaCleanValues();
+        $this->_media->mediaRemoveUnknownFiles();
+        $this->_media->mediaCopyFiles();
+        $this->_media->mediaUpdateDataBase();
+        $this->_media->mediaDropTmpTables();
     }
 }

@@ -2,7 +2,6 @@
 
 namespace Pimgento\Category\Model\Factory;
 
-use Magento\Staging\Model\VersionManager;
 use \Pimgento\Import\Model\Factory;
 use \Pimgento\Entities\Model\Entities;
 use \Pimgento\Import\Helper\Config as helperConfig;
@@ -14,7 +13,9 @@ use \Magento\Catalog\Model\Category;
 use \Magento\Framework\App\Cache\TypeListInterface;
 use \Magento\Framework\Module\Manager as moduleManager;
 use \Magento\Framework\App\Config\ScopeConfigInterface as scopeConfig;
+use \Magento\Staging\Model\VersionManager;
 use \Zend_Db_Expr as Expr;
+use \Exception;
 
 class Import extends Factory
 {
@@ -150,8 +151,7 @@ class Import extends Factory
 
         } else {
             $this->_entities->matchEntity($this->getCode(), 'code', 'catalog_category_entity', 'entity_id');
-        }
-    }
+        }    }
 
     /**
      * Set categories Url Key
@@ -163,6 +163,8 @@ class Import extends Factory
 
         $stores = $this->_helperConfig->getStores('lang');
 
+        $keys = [];
+
         foreach ($stores as $local => $affected) {
             if ($connection->tableColumnExists($tmpTable, 'label-' . $local)) {
 
@@ -170,14 +172,22 @@ class Import extends Factory
 
                 $query = $connection->query(
                     $connection->select()
-                        ->from($tmpTable, array('entity_id' => '_entity_id', 'name' => 'label-' . $local))
+                        ->from($tmpTable, ['entity_id' => '_entity_id', 'name' => 'label-' . $local])
                 );
 
                 while (($row = $query->fetch())) {
                     $urlKey = $this->_category->formatUrlKey($row['name']);
 
+                    $finalKey = $urlKey;
+                    $increment = 1;
+                    while (in_array($finalKey, $keys)) {
+                        $finalKey = $urlKey . '-' . $increment++;
+                    }
+
+                    $keys[] = $finalKey;
+
                     $connection->update(
-                        $tmpTable, array('url_key-' . $local => $urlKey), array('_entity_id = ?' => $row['entity_id'])
+                        $tmpTable, ['url_key-' . $local => $finalKey], ['_entity_id = ?' => $row['entity_id']]
                     );
                 }
             }
@@ -334,10 +344,8 @@ class Import extends Factory
             'display_mode'    => new Expr('"PRODUCTS"'),
         );
 
-        $identifierField =  $this->stagingConfigHelper->isCatalogStagingModulesEnabled() ? 'row_id' : 'entity_id';
-
         $this->_entities->setValues(
-            $this->getCode(), $connection->getTableName('catalog_category_entity'), $values, 3, 0, 2, $identifierField
+            $this->getCode(), $connection->getTableName('catalog_category_entity'), $values, 3, 0, 2
         );
 
         $stores = $this->_helperConfig->getStores('lang');
@@ -355,8 +363,7 @@ class Import extends Factory
                         $values,
                         3,
                         $store['store_id'],
-                        1,
-                        $identifierField
+                        1
                     );
                 }
             }
