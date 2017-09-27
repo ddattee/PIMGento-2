@@ -151,7 +151,8 @@ class Import extends Factory
 
         } else {
             $this->_entities->matchEntity($this->getCode(), 'code', 'catalog_category_entity', 'entity_id');
-        }    }
+        }
+    }
 
     /**
      * Set categories Url Key
@@ -163,17 +164,24 @@ class Import extends Factory
 
         $stores = $this->_helperConfig->getStores('lang');
 
-        $keys = [];
-
         foreach ($stores as $local => $affected) {
+
+            $keys = [];
+
             if ($connection->tableColumnExists($tmpTable, 'label-' . $local)) {
 
                 $connection->addColumn($tmpTable, 'url_key-' . $local, 'VARCHAR(255) NOT NULL DEFAULT ""');
 
-                $query = $connection->query(
-                    $connection->select()
-                        ->from($tmpTable, ['entity_id' => '_entity_id', 'name' => 'label-' . $local])
-                );
+                $select = $connection->select()
+                    ->from($tmpTable, ['entity_id' => '_entity_id', 'name' => 'label-' . $local]);
+
+                $updateUrlKeyConfig = $this->_scopeConfig->getValue('pimgento/category/update_url_key');
+
+                if (!$updateUrlKeyConfig) {
+                    $select->where('_is_new = ?', 1);
+                }
+
+                $query = $connection->query($select);
 
                 while (($row = $query->fetch())) {
                     $urlKey = $this->_category->formatUrlKey($row['name']);
@@ -188,6 +196,14 @@ class Import extends Factory
 
                     $connection->update(
                         $tmpTable, ['url_key-' . $local => $finalKey], ['_entity_id = ?' => $row['entity_id']]
+                    );
+                }
+
+                if (!$updateUrlKeyConfig) {
+                    $connection->update(
+                        $tmpTable,
+                        ['url_key-' . $local => \Pimgento\Entities\Model\ResourceModel\Entities::IGNORE_VALUE],
+                        ['_is_new = ?' => 0]
                     );
                 }
             }
@@ -221,7 +237,7 @@ class Import extends Factory
             if ($connection->tableColumnExists($tmpTable, 'url_key-' . $local)) {
                 $connection->addColumn($tmpTable, '_url_rewrite-' . $local, 'VARCHAR(255) NOT NULL DEFAULT ""');
                 $updateRewrite[] = 'c1.`_url_rewrite-' . $local . '` =
-                    TRIM(BOTH "/" FROM CONCAT(c2.`_url_rewrite-' . $local . '`, "/", c1.`url_key-' . $local . '`))';
+                    IF(c1.`url_key-' . $local . '` <> "", TRIM(BOTH "/" FROM CONCAT(c2.`_url_rewrite-' . $local . '`, "/", c1.`url_key-' . $local . '`)), "")';
             }
         }
 
@@ -284,8 +300,23 @@ class Import extends Factory
      */
     public function createEntities()
     {
-        $connection = $this->_entities->getResource()->getConnection();
+        $resource = $this->_entities->getResource();
+        $connection = $resource->getConnection();
         $tmpTable = $this->_entities->getTableName($this->getCode());
+
+        if ($connection->isTableExists($resource->getTable('sequence_catalog_category'))) {
+            $values = array(
+                'sequence_value' => '_entity_id',
+            );
+            $parents = $connection->select()->from($tmpTable, $values);
+            $connection->query(
+                $connection->insertFromSelect(
+                    $parents, $resource->getTable('sequence_catalog_category'), array_keys($values), 1
+                )
+            );
+        }
+
+        $table = $resource->getTable('catalog_category_entity');
 
         $values = array(
             'entity_id'        => '_entity_id',
@@ -299,8 +330,8 @@ class Import extends Factory
         );
 
         if ($this->stagingConfigHelper->isCatalogStagingModulesEnabled()) {
-            $values['created_in'] =  'created_in';
-            $values['updated_in'] = 'updated_in';
+            $values['created_in'] = new Expr(1);
+            $values['updated_in'] = new Expr(VersionManager::MAX_VERSION);
             $values['row_id'] = '_row_id';
         }
 
@@ -310,7 +341,7 @@ class Import extends Factory
         $connection->query(
             $connection->insertFromSelect(
                 $parents,
-                $connection->getTableName('catalog_category_entity'),
+                $table,
                 array_keys($values),
                 1
             )
@@ -326,7 +357,11 @@ class Import extends Factory
         $values = array(
             'created_at' => new Expr('now()')
         );
-        $connection->update($connection->getTableName('catalog_category_entity'), $values, 'created_at IS NULL');
+        $connection->update($table, $values, 'created_at IS NULL');
+
+        if ($this->stagingConfigHelper->isCatalogStagingModulesEnabled()) {
+            $connection->update($table, $values, 'created_in = 0 AND updated_in = 0');
+        }
     }
 
     /**
@@ -334,7 +369,8 @@ class Import extends Factory
      */
     public function setValues()
     {
-        $connection = $this->_entities->getResource()->getConnection();
+        $resource = $this->_entities->getResource();
+        $connection = $resource->getConnection();
         $tmpTable = $this->_entities->getTableName($this->getCode());
 
         $values = array(
@@ -345,7 +381,7 @@ class Import extends Factory
         );
 
         $this->_entities->setValues(
-            $this->getCode(), $connection->getTableName('catalog_category_entity'), $values, 3, 0, 2
+            $this->getCode(), $resource->getTable('catalog_category_entity'), $values, 3, 0, 2
         );
 
         $stores = $this->_helperConfig->getStores('lang');
@@ -359,7 +395,7 @@ class Import extends Factory
                     );
                     $this->_entities->setValues(
                         $this->getCode(),
-                        $connection->getTableName('catalog_category_entity'),
+                        $resource->getTable('catalog_category_entity'),
                         $values,
                         3,
                         $store['store_id'],
@@ -375,12 +411,13 @@ class Import extends Factory
      */
     public function updateChildrenCount()
     {
-        $connection = $this->_entities->getResource()->getConnection();
+        $resource = $this->_entities->getResource();
+        $connection = $resource->getConnection();
 
         $connection->query('
-            UPDATE `' . $connection->getTableName('catalog_category_entity') . '` c SET `children_count` = (
+            UPDATE `' . $resource->getTable('catalog_category_entity') . '` c SET `children_count` = (
                 SELECT COUNT(`parent_id`) FROM (
-                    SELECT * FROM `' . $connection->getTableName('catalog_category_entity') . '`
+                    SELECT * FROM `' . $resource->getTable('catalog_category_entity') . '`
                 ) tmp
                 WHERE tmp.`path` LIKE CONCAT(c.`path`,\'/%\')
             )
@@ -408,7 +445,12 @@ class Import extends Factory
                         continue;
                     }
 
-                    $this->_urlRewriteHelper->rewriteUrls($this->getCode(), $store['store_id'], $column);
+                    $this->_urlRewriteHelper->rewriteUrls(
+                        $this->getCode(),
+                        $store['store_id'],
+                        $column,
+                        $this->_scopeConfig->getValue('catalog/seo/category_url_suffix')
+                    );
                 }
             }
 

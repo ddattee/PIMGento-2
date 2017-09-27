@@ -28,6 +28,11 @@ class Media extends Factory
     protected $_entities;
 
     /**
+     * @var Image $image
+     */
+    protected $image;
+
+    /**
      * @var StagingConfigHelper
      */
     protected $stagingConfigHelper;
@@ -41,6 +46,7 @@ class Media extends Factory
      * @param \Magento\Framework\App\Config\ScopeConfigInterface $scopeConfig
      * @param \Pimgento\Entities\Model\Entities                  $entities
      * @param \Pimgento\Product\Helper\Media                     $mediaHelper
+     * @param \Magento\Catalog\Model\Product\Image               $image
      * @param array                                              $data
      */
     public function __construct(
@@ -50,6 +56,7 @@ class Media extends Factory
         scopeConfig $scopeConfig,
         Entities $entities,
         mediaHelper $mediaHelper,
+        Image $image,
         StagingConfigHelper $stagingConfigHelper,
         array $data = []
     ) {
@@ -57,6 +64,7 @@ class Media extends Factory
 
         $this->_entities = $entities;
         $this->_mediaHelper = $mediaHelper;
+        $this->image = $image;
         $this->stagingConfigHelper = $stagingConfigHelper;
     }
 
@@ -355,6 +363,9 @@ class Media extends Factory
                 }
 
                 copy($from, $to);
+
+                $this->image->setBaseFile($media['to']);
+                $this->image->saveFile();
             }
         }
     }
@@ -366,7 +377,8 @@ class Media extends Factory
      */
     public function mediaUpdateDataBase()
     {
-        $connection = $this->_entities->getResource()->getConnection();
+        $resource = $this->_entities->getResource();
+        $connection = $resource->getConnection();
         $tableMedia = $this->_entities->getTableName('media');
         $step = 5000;
 
@@ -394,14 +406,14 @@ class Media extends Factory
             ->where('t.attribute_id is not null');
         $query = $connection->insertFromSelect(
             $select,
-            $connection->getTableName('catalog_product_entity_varchar'),
+            $resource->getTable('catalog_product_entity_varchar'),
             array_keys($cols),
             AdapterInterface::INSERT_ON_DUPLICATE
         );
         $connection->query($query);
 
         // working on "media gallery"
-        $tableGallery = $connection->getTableName('catalog_product_entity_media_gallery');
+        $tableGallery = $resource->getTable('catalog_product_entity_media_gallery');
 
         // get the value id from gallery (for already existing medias)
         $maxId = $this->mediaGetMaxId($tableGallery, 'value_id');
@@ -457,7 +469,7 @@ class Media extends Factory
         }
 
         // working on "media gallery value"
-        $tableGallery = $connection->getTableName('catalog_product_entity_media_gallery_value');
+        $tableGallery = $resource->getTable('catalog_product_entity_media_gallery_value');
 
         // get the record id from gallery value (for new medias)
         $maxId = $this->mediaGetMaxId($tableGallery, 'record_id');
@@ -499,7 +511,7 @@ class Media extends Factory
         $connection->query($query);
 
         // working on "media gallery value to entity"
-        $tableGallery = $connection->getTableName('catalog_product_entity_media_gallery_value_to_entity');
+        $tableGallery = $resource->getTable('catalog_product_entity_media_gallery_value_to_entity');
 
         $identifier = $this->_entities->getColumnIdentifier($tableGallery);
 
