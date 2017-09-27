@@ -107,9 +107,43 @@ They must be in a folder *files* in the same folder of the simple product csv fi
 You can configure the columns to use in the Magento Catalog Pimgento configuration section.
 The value must be exactly the path of the image, relatively to the csv file: files/foo/bar.png
 
+## Staging support
+Pimgento is compatible with Magento EE Staging. It has 4 modes for updating products. 
+
+Categories are using the "Update Last Created Stage" mode and can't be configured for now. 
+
+### Staging Modes
+
+#### Update Last Created Stage
+In this mode pimgento will simply update the last version of the product that exists. 
+It won't change any other versions.
+
+#### Update Current Stage
+In this mode pimgento will simply update the current version of the product.
+It won't change any other versions.
+
+#### Update All Stages
+In this mode Pimgento will update all the version/stages of the products. 
+
+You should use this mode if for example you are handling prices throught the staging in Magento but get the products information from your PIM and don't wish to have different product information on different stages.
+
+#### Full mode 
+In this mode you need to have in your product csv file the additional fields `from` and `to`. Those columns needs to be dates in the fallowing format : `YYYY-MM-DD` 
+
+Those fields are going to be used to create new stages for the products during the import. There is a few points you need to look for : 
+* You can't update or create stages that has already started. 
+* You can't have 2 stages starting the same day but finishing on a different day (Magento handles this by simply adding a second to the beginning of the stage but pimgento won't handle it.)
+* You can't have different stages on simple products of the same configurable. 
+* You can't edit existing stages. 
+  * If you created a stage from 2016-01-20 to the infinity and try to import a new version that starts at the same date it won't allow it. Basically you won't be allowed to create any new stage on this product.
+  * If you created a stage from 2016-01-20 to 2017-01-20 you won't be able to create a stage in between. 
+
+
 ## Roadmap
 
 * Pim code exclusion
+* Improve Magento EE 2.1 Staging support on categories like it was done on products.
+* Improve version date checks during staging full import. Currently some import dates brakes the DB.
 
 ## About us
 
