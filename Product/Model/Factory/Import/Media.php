@@ -6,12 +6,13 @@ use \Pimgento\Import\Model\Factory;
 use \Pimgento\Entities\Model\Entities;
 use \Pimgento\Import\Helper\Config as helperConfig;
 use \Pimgento\Product\Helper\Media as mediaHelper;
-use Pimgento\Staging\Helper\Config as StagingConfigHelper;
+use \Pimgento\Staging\Helper\Config as StagingConfigHelper;
 use \Magento\Framework\Event\ManagerInterface;
 use \Magento\Framework\Module\Manager as moduleManager;
 use \Magento\Framework\App\Config\ScopeConfigInterface as scopeConfig;
 use \Magento\Framework\DB\Adapter\AdapterInterface;
 use \Magento\Framework\DB\Ddl\Table;
+use \Magento\Catalog\Model\Product\Image;
 use \Zend_Db_Expr as Expr;
 
 class Media extends Factory
