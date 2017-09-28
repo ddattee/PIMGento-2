@@ -128,7 +128,7 @@ class AddPimgentoImportObserver extends AbstractAddImportObserver implements Obs
             ),
             /* Step that will work only if staging enabled & certain options are selected. */
             array(
-                'comment' => __('Update All stages'),
+                'comment' => __('Update stages'),
                 'method'  => 'updateAllStages',
             ),
         );
