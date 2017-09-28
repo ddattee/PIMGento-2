@@ -1157,7 +1157,7 @@ class Import extends Factory
              * In this mode pimgento will need to duplicate some information. It needs to do this because a new version
              * has been created and the old version was split in 2 parts that needs to have the same data.
              */
-            $duplicateTmpTable = $this->_entities->getTableName('entity_stage_duplicate');
+            $duplicateTmpTable = $this->_entities->getResource()->getConnection()->getTableName('tmp_pimgento_entity_stage_duplicate');
             $condition = 't.created_in = e.created_in';
 
             $this->stagingProductHelper
