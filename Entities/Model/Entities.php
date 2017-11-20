@@ -140,7 +140,8 @@ class Entities extends AbstractModel implements EntitiesInterface, IdentityInter
             $file,
             $this->getTableName($tableSuffix),
             $this->_configHelper->getCsvConfig()['fields_terminated'],
-            $this->_configHelper->getCsvConfig()['fields_enclosure']
+            $this->_configHelper->getCsvConfig()['fields_enclosure'],
+            $this->_configHelper->getQueryNumber()
         );
     }
 

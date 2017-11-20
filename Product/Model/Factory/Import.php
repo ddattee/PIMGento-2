@@ -555,7 +555,7 @@ class Import extends Factory
                 }
                 //in case of multiselect
                 $conditionJoin = "IF ( locate(',', `".$column."`) > 0 , ". "`p`.`".$column."` like ".
-                    new Expr("CONCAT('%', `c1`.`code`, '%')") .", `p`.`".$column."` = `c1`.`code` )";
+                                 new Expr("CONCAT('%', `c1`.`code`, '%')") .", `p`.`".$column."` = `c1`.`code` )";
 
                 $select = $connection->select()
                     ->from(
@@ -1076,57 +1076,64 @@ class Import extends Factory
 
         $this->_urlRewriteHelper->createUrlTmpTable();
 
+        $columns = [];
+
         foreach ($stores as $local => $affected) {
-
-            $column = 'url_key';
-
             if ($connection->tableColumnExists($tmpTable, 'url_key-' . $local)) {
-                $column = 'url_key-' . $local;
-            }
-
-            if ($connection->tableColumnExists($tmpTable, $column)) {
-
-                $duplicates = $connection->fetchCol(
-                    $connection->select()
-                        ->from($tmpTable, [$column])
-                        ->group($column)
-                        ->having('COUNT(*) > 1')
-                );
-
-                foreach ($duplicates as $urlKey) {
-                    if ($urlKey) {
-                        $connection->update(
-                            $tmpTable,
-                            [$column => new Expr('CONCAT(`' . $column . '`, "-", `sku`)')],
-                            ['`' . $column . '` = ?' => $urlKey]
-                        );
-                    }
-                }
-
                 foreach ($affected as $store) {
-
-                    if ($store['store_id'] == 0) {
-                        continue;
-                    }
-
-                    $this->_entities->setValues(
-                        $this->getCode(),
-                        $resource->getTable('catalog_product_entity'),
-                        ['url_key' => $column],
-                        4,
-                        $store['store_id'],
-                        1
-                    );
-
-                    $this->_urlRewriteHelper->rewriteUrls(
-                        $this->getCode(),
-                        $store['store_id'],
-                        $column,
-                        $this->_scopeConfig->getValue('catalog/seo/product_url_suffix')
-                    );
+                    $columns[$store['store_id']] = 'url_key-' . $local;
                 }
             }
         }
+
+        if (!count($columns)) {
+            foreach ($stores as $local => $affected) {
+                foreach ($affected as $store) {
+                    $columns[$store['store_id']] = 'url_key';
+                }
+            }
+        }
+
+        foreach ($columns as $store => $column) {
+            if ($store == 0) {
+                continue;
+            }
+
+            $duplicates = $connection->fetchCol(
+                $connection->select()
+                    ->from($tmpTable, [$column])
+                    ->group($column)
+                    ->having('COUNT(*) > 1')
+            );
+
+            foreach ($duplicates as $urlKey) {
+                if ($urlKey) {
+                    $connection->update(
+                        $tmpTable,
+                        [$column => new Expr('CONCAT(`' . $column . '`, "-", `sku`)')],
+                        ['`' . $column . '` = ?' => $urlKey]
+                    );
+                }
+            }
+
+            $this->_entities->setValues(
+                $this->getCode(),
+                $resource->getTable('catalog_product_entity'),
+                ['url_key' => $column],
+                4,
+                $store,
+                1
+            );
+
+            $this->_urlRewriteHelper->rewriteUrls(
+                $this->getCode(),
+                $store,
+                $column,
+                $this->_scopeConfig->getValue('catalog/seo/product_url_suffix')
+            );
+
+        }
+
 
         $this->_urlRewriteHelper->dropUrlRewriteTmpTable();
     }

@@ -99,7 +99,7 @@ class Config extends AbstractHelper
             $channel = $website->getCode();
 
             foreach ($channels as $match) {
-                if ($match['website'] == $website->getCode()) {
+                if (isset($match['website']) && $match['website'] == $website->getCode()) {
                     $channel = $match['channel'];
                 }
             }

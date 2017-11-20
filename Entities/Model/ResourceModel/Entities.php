@@ -207,12 +207,13 @@ class Entities extends AbstractDb
      * @param string $tableName
      * @param string $fieldsTerminated
      * @param string $fieldsEnclosure
+     * @param int    $queryNumber
      *
      * @return int
      *
      * @throws \Exception
      */
-    public function insertByRows($file, $tableName, $fieldsTerminated = ';', $fieldsEnclosure = '"')
+    public function insertByRows($file, $tableName, $fieldsTerminated = ';', $fieldsEnclosure = '"', $queryNumber = 1000)
     {
         if (!file_exists($file)) {
             throw new \Exception(__("%s does not exist.", $file));
@@ -259,7 +260,7 @@ class Entities extends AbstractDb
                 $columnValues[$rowCount][$columnNames[$key]] = $value;
             }
 
-            if ($rowCount % 1000 == 0) {
+            if ($rowCount % $queryNumber == 0) {
                 // Insert our row into the tmp table
                 $connection->insertMultiple($tableName, $columnValues);
                 $columnValues = array();

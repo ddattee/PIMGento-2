@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [100.2.23] - 2017-10-25
+
+  * update: set query number for rows insertion in configuration
+  * fix : avoid warning with website matching
+
+## [100.2.22] - 2017-09-27
+
+  * fix: Url Key localized
+
 ## [100.2.21] - 2017-09-25
 
   * fix: Variant table engine for big data

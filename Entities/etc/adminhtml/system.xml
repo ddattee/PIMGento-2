@@ -23,6 +23,13 @@
                         <field id="data_insertion_method">data_in_file</field>
                     </depends>
                 </field>
+                <field id="query_number" translate="label" type="text" sortOrder="70" showInDefault="1" showInWebsite="0" showInStore="0">
+                    <label>Query Number</label>
+                    <comment>Number of requests for Multiple Insert</comment>
+                    <depends>
+                        <field id="data_insertion_method">by_rows</field>
+                    </depends>
+                </field>
             </group>
         </section>
     </system>

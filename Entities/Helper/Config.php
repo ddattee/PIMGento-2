@@ -50,4 +50,13 @@ class Config extends AbstractHelper
         return (string) $this->scopeConfig->getValue('pimgento/general/data_insertion_method');
     }
 
+    /**
+     * Retrieve query number for multiple insert
+     *
+     * @return int
+     */
+    public function getQueryNumber()
+    {
+        return (int) $this->scopeConfig->getValue('pimgento/general/query_number');
+    }
 }
