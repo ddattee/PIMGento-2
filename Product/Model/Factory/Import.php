@@ -567,12 +567,8 @@ class Import extends Factory
                     )
                     ->distinct()
                     ->joinInner(
-                        array('c1' => $connection->getTableName('pimgento_entities')),
-                        'FIND_IN_SET(
-                            REPLACE(`c1`.`code`, "' . $columnPrefix . '_", ""),
-                            `p`.`' . $column . '`
-                        )
-                        AND `c1`.`import` = "option"',
+                        array('c1' => new Expr('('.(string) $subSelect.')')),
+                        new Expr($conditionJoin),
                         array(
                             $column => new Expr('GROUP_CONCAT(`c1`.`entity_id` SEPARATOR ",")')
                         )
