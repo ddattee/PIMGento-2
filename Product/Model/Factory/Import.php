@@ -620,6 +620,8 @@ class Import extends Factory
         $table = $resource->getTable('catalog_product_entity');
 
         if ($this->stagingConfigHelper->isCatalogStagingModulesEnabled()) {
+            $values['created_in'] =  'created_in';
+            $values['updated_in'] = 'updated_in';
             $values['row_id'] = '_row_id';
         }
 
