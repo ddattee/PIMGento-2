@@ -6,6 +6,7 @@ use \Pimgento\Import\Model\Factory;
 use \Pimgento\Entities\Model\Entities;
 use \Pimgento\Import\Helper\Config as helperConfig;
 use \Pimgento\Import\Helper\UrlRewrite as urlRewriteHelper;
+use Pimgento\Product\Helper\Config;
 use \Pimgento\Staging\Helper\Config as StagingConfigHelper;
 use \Pimgento\Product\Helper\Staging as StagingProductHelper;
 use \Pimgento\Staging\Helper\Import as StagingHelper;
@@ -232,10 +233,10 @@ class Import extends Factory
             );
         }
 
-        $matches = $this->_scopeConfig->getValue('pimgento/product/attribute_mapping');
+        $matches = $this->_scopeConfig->getValue(Config::CONFIG_PIMGENTO_PRODUCT_ATTR_MAPPING);
 
         if ($matches) {
-            $matches = unserialize($matches);
+            $matches = json_decode($matches);
             if (is_array($matches)) {
                 $stores = array_merge(
                     $this->_helperConfig->getStores(array('lang')), // en_US
@@ -336,10 +337,10 @@ class Import extends Factory
                 $data['categories'] = 'e.categories';
             }
 
-            $additional = $this->_scopeConfig->getValue('pimgento/product/configurable_attributes');
+            $additional = $this->_scopeConfig->getValue(Config::CONFIG_PIMGENTO_PRODUCT_CONFIGURABLE_ATTR);
 
             if ($additional) {
-                $additional = unserialize($additional);
+                $additional = json_decode($additional);
                 if (is_array($additional)) {
 
                     $stores = array_merge(
@@ -1292,7 +1293,7 @@ class Import extends Factory
      */
     public function importMedia()
     {
-        $enabled = $this->_scopeConfig->getValue('pimgento/image/enabled');
+        $enabled = $this->_scopeConfig->getValue(Config::CONFIG_PIMGENTO_IMG_ENABLED);
 
         if (!$enabled) {
             $this->setMessage(

@@ -2,6 +2,7 @@
 
 namespace Pimgento\Category\Model\Factory;
 
+use Pimgento\Category\Helper\Config;
 use \Pimgento\Import\Model\Factory;
 use \Pimgento\Entities\Model\Entities;
 use \Pimgento\Import\Helper\Config as helperConfig;
@@ -175,7 +176,7 @@ class Import extends Factory
                 $select = $connection->select()
                     ->from($tmpTable, ['entity_id' => '_entity_id', 'name' => 'label-' . $local]);
 
-                $updateUrlKeyConfig = $this->_scopeConfig->getValue('pimgento/category/update_url_key');
+                $updateUrlKeyConfig = $this->_scopeConfig->getValue(Config::CONFIG_PIMGENTO_CAT_UPDATE_URL_KEY);
 
                 if (!$updateUrlKeyConfig) {
                     $select->where('_is_new = ?', 1);

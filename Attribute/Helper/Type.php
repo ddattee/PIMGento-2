@@ -43,7 +43,7 @@ class Type extends AbstractHelper
      */
     public function getAdditionalTypes()
     {
-        $types = $this->scopeConfig->getValue('pimgento/attribute/types');
+        $types = $this->scopeConfig->getValue(Config::CONFIG_PIMGENTO_ATTR_TYPES);
 
         $additional = array();
 

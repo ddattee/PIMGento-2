@@ -13,6 +13,9 @@ use \Magento\CatalogInventory\Model\Configuration as CatalogInventoryConfigurati
 
 class Config extends AbstractHelper
 {
+    /** Config keys */
+    const PIMGENTO_CONFIG_IMPORT_DIR_KEY      = 'pimgento/general/import_directory';
+    const PIMGENTO_CONFIG_WEBSITE_MAPPING_KEY = 'pimgento/general/website_mapping';
 
     /**
      * @var \Magento\Framework\Filesystem
@@ -62,7 +65,7 @@ class Config extends AbstractHelper
         $varDirectory = $this->fileSystem->getDirectoryRead(DirectoryList::VAR_DIR);
 
         return $varDirectory->getAbsolutePath(
-            $this->scopeConfig->getValue('pimgento/general/import_directory')
+            $this->scopeConfig->getValue(self::PIMGENTO_CONFIG_IMPORT_DIR_KEY)
         );
     }
 
@@ -82,7 +85,7 @@ class Config extends AbstractHelper
             $arrayKey = array($arrayKey);
         }
 
-        $channels = $this->scopeConfig->getValue('pimgento/general/website_mapping');
+        $channels = $this->scopeConfig->getValue(self::PIMGENTO_CONFIG_WEBSITE_MAPPING_KEY);
 
         if ($channels) {
             $channels = unserialize($channels);

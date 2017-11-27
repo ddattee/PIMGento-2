@@ -6,6 +6,14 @@ use \Magento\Framework\App\Helper\AbstractHelper;
 
 class Config extends AbstractHelper
 {
+    /** Config keys */
+    const CONFIG_PIMGENTO_EOL              = 'pimgento/general/lines_terminated';
+    const CONFIG_PIMGENTO_EOF              = 'pimgento/general/fields_terminated';
+    const CONFIG_PIMGENTO_ENCLOSURE        = 'pimgento/general/fields_enclosure';
+    const CONFIG_PIMGENTO_LOCAL_DATA       = 'pimgento/general/load_data_local';
+    const CONFIG_PIMGENTO_INSERTION_METHOD = 'pimgento/general/data_insertion_method';
+    const CONFIG_PIMGENTO_QUERY_NB         = 'pimgento/general/query_number';
+
     /**
      * Data in file insertion method
      */
@@ -24,9 +32,9 @@ class Config extends AbstractHelper
     public function getCsvConfig()
     {
         return array(
-            'lines_terminated'  => $this->scopeConfig->getValue('pimgento/general/lines_terminated'),
-            'fields_terminated' => $this->scopeConfig->getValue('pimgento/general/fields_terminated'),
-            'fields_enclosure'  => $this->scopeConfig->getValue('pimgento/general/fields_enclosure'),
+            'lines_terminated'  => $this->scopeConfig->getValue(self::CONFIG_PIMGENTO_EOL),
+            'fields_terminated' => $this->scopeConfig->getValue(self::CONFIG_PIMGENTO_EOF),
+            'fields_enclosure'  => $this->scopeConfig->getValue(self::CONFIG_PIMGENTO_ENCLOSURE),
         );
     }
 
@@ -37,7 +45,7 @@ class Config extends AbstractHelper
      */
     public function getLoadDataLocal()
     {
-        return $this->scopeConfig->getValue('pimgento/general/load_data_local');
+        return $this->scopeConfig->getValue(self::CONFIG_PIMGENTO_LOCAL_DATA);
     }
 
     /**
@@ -47,7 +55,7 @@ class Config extends AbstractHelper
      */
     public function getInsertionMethod()
     {
-        return (string) $this->scopeConfig->getValue('pimgento/general/data_insertion_method');
+        return (string) $this->scopeConfig->getValue(self::CONFIG_PIMGENTO_INSERTION_METHOD);
     }
 
     /**
@@ -57,6 +65,6 @@ class Config extends AbstractHelper
      */
     public function getQueryNumber()
     {
-        return (int) $this->scopeConfig->getValue('pimgento/general/query_number');
+        return (int) $this->scopeConfig->getValue(self::CONFIG_PIMGENTO_QUERY_NB);
     }
 }
